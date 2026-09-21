@@ -1,0 +1,2 @@
+"ride_id","rideable_type","started_at","ended_at","start_station_name","start_station_id","end_station_name","end_station_id","start_lat","start_lng","end_lat","end_lng","member_casual"
+"TEST-RIDE-B","electric_bike","2023-07-02 09:00:00","2023-07-02 09:20:00","Station B","100.02","Station C","100.03",40.7100,-73.9100,40.7200,-73.9200,"casual"

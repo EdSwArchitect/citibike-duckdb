@@ -476,9 +476,10 @@ curl http://localhost:8080/q/metrics
 
 ## Risks And Open Decisions
 
-- **Logging backend:** confirm whether SLF4J with Quarkus JBoss Log Manager is
-  acceptable. Requiring Logback introduces an experimental extension and
-  additional compatibility risk.
+- **Logging backend:** implemented SLF4J with Quarkus JBoss Log Manager. Raw
+  Logback Classic was not added because it would compete with Quarkus's
+  supported backend; the experimental Quarkiverse adapter remains an option
+  for a future compatibility spike.
 - **Classpath discovery:** Java does not provide a universally reliable API for
   listing resource-directory contents. Prefer an automatically generated
   build-time index if fast-JAR enumeration is inconsistent.
@@ -498,19 +499,19 @@ curl http://localhost:8080/q/metrics
 
 ## Milestones
 
-- [ ] Quarkus build and configuration
-- [ ] Classpath `*.csv` discovery
-- [ ] Packaged-JAR resource verification
-- [ ] Safe DuckDB lifecycle and bounded concurrency
-- [ ] Transactional multi-file loading
-- [ ] Schema, provenance, and duplicate validation
-- [ ] Analytical JDBC query repository
-- [ ] Validated REST API
-- [ ] SQL injection and resource protections
-- [ ] SLF4J logging
-- [ ] Micrometer metrics and health checks
-- [ ] Unit, repository, REST, and security tests
-- [ ] Packaging and documentation verification
+- [x] Quarkus build and configuration
+- [x] Classpath `*.csv` discovery
+- [x] Packaged-JAR resource verification
+- [x] Safe DuckDB lifecycle and bounded concurrency
+- [x] Transactional multi-file loading
+- [x] Schema, provenance, and duplicate validation
+- [x] Analytical JDBC query repository
+- [x] Validated REST API
+- [x] SQL injection and resource protections
+- [x] SLF4J logging
+- [x] Micrometer metrics and health checks
+- [x] Unit, repository, REST, and security tests
+- [x] Packaging and documentation verification
 
 ## References
 

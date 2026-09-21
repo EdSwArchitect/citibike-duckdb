@@ -1,0 +1,2 @@
+"ride_id","rideable_type","started_at","ended_at","start_station_name","start_station_id","end_station_name","end_station_id","start_lat","start_lng","end_lat","end_lng","member_casual"
+"TEST-RIDE-A","classic_bike","2023-07-01 08:00:00","2023-07-01 08:10:00","Station A","100.01","Station B","100.02",40.7000,-73.9000,40.7100,-73.9100,"member"

@@ -1,0 +1,7 @@
+package com.bscllc.learning.citibike.db;
+
+public class DataAccessException extends RuntimeException {
+    public DataAccessException(String message, Throwable cause) {
+        super(message, cause);
+    }
+}
