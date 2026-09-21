@@ -108,9 +108,9 @@ so framework and application logs share one configuration without introducing
 the conflicting `logback-classic` runtime.
 
 The main implementation is under
-[`src/main/java/com/edwin3/duckdb`](src/main/java/com/edwin3/duckdb), with
+[`src/main/java/com/bscllc/learning/citibike`](src/main/java/com/bscllc/learning/citibike), with
 integration and repository coverage under
-[`src/test/java/com/edwin3/duckdb`](src/test/java/com/edwin3/duckdb).
+[`src/test/java/com/bscllc/learning/citibike`](src/test/java/com/bscllc/learning/citibike).
 
 ## Add Data
 
