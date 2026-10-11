@@ -8,7 +8,9 @@ public record RideSummaryResponse(
         long rideCount,
         Double averageDurationSeconds,
         Double medianDurationSeconds,
+        Double p90DurationSeconds,
         Double p95DurationSeconds,
+        long roundTripCount,
         long ridesOver24Hours
 ) {
 }

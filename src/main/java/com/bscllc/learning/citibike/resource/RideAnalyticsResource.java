@@ -11,7 +11,7 @@ import com.bscllc.learning.citibike.dto.StationImbalanceResponse;
 import com.bscllc.learning.citibike.dto.TimeBucketResponse;
 import com.bscllc.learning.citibike.service.RideAnalyticsService;
 import io.smallrye.common.annotation.Blocking;
-import jakarta.ws.rs.DefaultValue;
+import com.bscllc.learning.citibike.validation.InvalidRequestException;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
@@ -88,10 +88,11 @@ public class RideAnalyticsResource {
             @QueryParam("direction") String direction,
             @QueryParam("sort") String sort,
             @QueryParam("order") String order,
-            @QueryParam("limit") Integer limit,
-            @QueryParam("offset") Integer offset) {
+            @QueryParam("limit") String limit,
+            @QueryParam("offset") String offset,
+            @QueryParam("stationName") String stationName) {
         return service.stations(from, to, riderType, bikeType, direction, sort, order,
-                limit, offset);
+                integer(limit, "limit"), integer(offset, "offset"), stationName);
     }
 
     @GET
@@ -101,13 +102,13 @@ public class RideAnalyticsResource {
             @QueryParam("to") String to,
             @QueryParam("riderType") String riderType,
             @QueryParam("bikeType") String bikeType,
-            @QueryParam("includeRoundTrips") @DefaultValue("false") Boolean includeRoundTrips,
+            @QueryParam("includeRoundTrips") String includeRoundTrips,
             @QueryParam("sort") String sort,
             @QueryParam("order") String order,
-            @QueryParam("limit") Integer limit,
-            @QueryParam("offset") Integer offset) {
-        return service.routes(from, to, riderType, bikeType, includeRoundTrips,
-                sort, order, limit, offset);
+            @QueryParam("limit") String limit,
+            @QueryParam("offset") String offset) {
+        return service.routes(from, to, riderType, bikeType, bool(includeRoundTrips),
+                sort, order, integer(limit, "limit"), integer(offset, "offset"));
     }
 
     @GET
@@ -115,9 +116,25 @@ public class RideAnalyticsResource {
     public PageResponse<StationImbalanceResponse> imbalance(
             @QueryParam("from") String from,
             @QueryParam("to") String to,
-            @QueryParam("limit") Integer limit,
-            @QueryParam("offset") Integer offset) {
-        return service.imbalance(from, to, limit, offset);
+            @QueryParam("limit") String limit,
+            @QueryParam("offset") String offset) {
+        return service.imbalance(from, to, integer(limit, "limit"), integer(offset, "offset"));
+    }
+
+    private static Integer integer(String value, String name) {
+        if (value == null) return null;
+        if (!value.matches("-?[0-9]{1,10}")) throw new InvalidRequestException(name + " must be an integer");
+        try {
+            return Integer.valueOf(value);
+        } catch (NumberFormatException e) {
+            throw new InvalidRequestException(name + " must be an integer");
+        }
+    }
+
+    private static Boolean bool(String value) {
+        if (value == null || "false".equalsIgnoreCase(value)) return false;
+        if ("true".equalsIgnoreCase(value)) return true;
+        throw new InvalidRequestException("includeRoundTrips must be true or false");
     }
 
     @GET

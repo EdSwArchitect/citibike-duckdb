@@ -15,11 +15,12 @@ public record DataQualityResponse(
         Map<String, Long> missingValues,
         long duplicateRideIds,
         long invalidDurations,
+        long invalidRows,
         long ridesOver24Hours,
         Instant loadedAt
 ) {
     public DataQualityResponse {
         sources = List.copyOf(sources);
-        missingValues = Map.copyOf(missingValues);
+        missingValues = java.util.Collections.unmodifiableMap(new java.util.TreeMap<>(missingValues));
     }
 }

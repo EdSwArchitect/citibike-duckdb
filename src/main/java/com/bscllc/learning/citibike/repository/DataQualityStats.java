@@ -6,6 +6,7 @@ public record DataQualityStats(
         Map<String, Long> missingValues,
         long duplicateRideIds,
         long invalidDurations,
+        long invalidRows,
         long ridesOver24Hours
 ) {
 }

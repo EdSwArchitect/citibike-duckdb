@@ -78,7 +78,7 @@ public class RideAnalyticsService {
 
     public PageResponse<StationActivityResponse> stations(
             String from, String to, String riderType, String bikeType,
-            String direction, String sort, String order, Integer limit, Integer offset) {
+            String direction, String sort, String order, Integer limit, Integer offset, String stationName) {
         StationDirection parsedDirection = ApiEnum.parse(
                 StationDirection.class, direction, StationDirection.START, "direction");
         StationSort parsedSort = ApiEnum.parse(
@@ -87,7 +87,7 @@ public class RideAnalyticsService {
                 SortDirection.class, order, SortDirection.DESC, "order");
         Page page = page(limit, offset);
         return repository.stations(filter(from, to, riderType, bikeType),
-                parsedDirection, parsedSort, parsedOrder, page.limit(), page.offset());
+                parsedDirection, parsedSort, parsedOrder, page.limit(), page.offset(), validateStationName(stationName));
     }
 
     public PageResponse<RouteSummaryResponse> routes(
@@ -121,8 +121,16 @@ public class RideAnalyticsService {
         return new DataQualityResponse(
                 report.filesDiscovered(), report.filesLoaded(), report.totalRows(), sources,
                 report.minimumStartedAt(), report.maximumStartedAt(), stats.missingValues(),
-                stats.duplicateRideIds(), stats.invalidDurations(), stats.ridesOver24Hours(),
+                stats.duplicateRideIds(), stats.invalidDurations(), stats.invalidRows(), stats.ridesOver24Hours(),
                 report.loadedAt());
+    }
+
+    private static String validateStationName(String name) {
+        if (name == null) return null;
+        if (name.isBlank() || name.length() > 200 || name.chars().anyMatch(Character::isISOControl)) {
+            throw new InvalidRequestException("stationName must contain 1 to 200 printable characters");
+        }
+        return name;
     }
 
     private RideFilter filter(String from, String to, String riderType, String bikeType) {
@@ -155,6 +163,9 @@ public class RideAnalyticsService {
             return defaultValue;
         }
         try {
+            if (!value.matches("[0-9]{4}-[0-9]{2}-[0-9]{2}")) {
+                throw new InvalidRequestException(name + " must use yyyy-MM-dd format");
+            }
             return LocalDate.parse(value);
         } catch (DateTimeParseException e) {
             throw new InvalidRequestException(name + " must use yyyy-MM-dd format");
@@ -162,7 +173,7 @@ public class RideAnalyticsService {
     }
 
     private Page page(Integer requestedLimit, Integer requestedOffset) {
-        int limit = requestedLimit == null ? 20 : requestedLimit;
+        int limit = requestedLimit == null ? Math.min(20, config.api().maxPageSize()) : requestedLimit;
         int offset = requestedOffset == null ? 0 : requestedOffset;
         if (limit < 1 || limit > config.api().maxPageSize()) {
             throw new InvalidRequestException(

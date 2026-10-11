@@ -18,6 +18,8 @@ final class RideSql {
             SELECT count(*) AS ride_count,
                    avg(date_diff('second', started_at, ended_at)) AS average_duration_seconds,
                    quantile_cont(date_diff('second', started_at, ended_at), 0.5) AS median_duration_seconds,
+                   quantile_cont(date_diff('second', started_at, ended_at), 0.90) AS p90_duration_seconds,
+                   count(*) FILTER (WHERE start_station_id = end_station_id) AS round_trip_count,
                    quantile_cont(date_diff('second', started_at, ended_at), 0.95) AS p95_duration_seconds,
                    count(*) FILTER (WHERE date_diff('second', started_at, ended_at) > 86400)
                        AS rides_over_24_hours
@@ -43,8 +45,6 @@ final class RideSql {
                 GROUP BY start_station_id, start_station_name,
                          end_station_id, end_station_name
             )
-            SELECT *, count(*) OVER () AS total_count
-            FROM grouped
             """.formatted(FILTER);
 
     static final String IMBALANCE = """
@@ -72,15 +72,23 @@ final class RideSql {
                        coalesce(starts.starts, 0) - coalesce(ends.ends, 0) AS net_starts
                 FROM starts FULL OUTER JOIN ends USING (station_id)
             )
-            SELECT *, count(*) OVER () AS total_count
-            FROM grouped
-            ORDER BY abs(net_starts) DESC, station_name ASC
-            LIMIT ? OFFSET ?
-            """;
+            """ + page("abs(net_starts) DESC, station_name ASC NULLS LAST, station_id ASC");
 
     static final String DATA_QUALITY = """
             SELECT
                 count(*) - count(DISTINCT ride_id) AS duplicate_ride_ids,
+                count(*) FILTER (WHERE
+                    ride_id IS NULL OR trim(ride_id) = ''
+                    OR rideable_type IS NULL OR rideable_type NOT IN ('classic_bike', 'electric_bike', 'docked_bike')
+                    OR member_casual IS NULL OR member_casual NOT IN ('member', 'casual')
+                    OR started_at IS NULL OR ended_at IS NULL
+                    OR NOT isfinite(started_at) OR NOT isfinite(ended_at) OR ended_at <= started_at
+                    OR start_lat IS NULL OR start_lng IS NULL
+                    OR start_lat NOT BETWEEN -90 AND 90 OR start_lng NOT BETWEEN -180 AND 180
+                    OR (end_lat IS NULL) <> (end_lng IS NULL)
+                    OR (end_lat IS NOT NULL AND end_lat NOT BETWEEN -90 AND 90)
+                    OR (end_lng IS NOT NULL AND end_lng NOT BETWEEN -180 AND 180)
+                ) AS invalid_rows,
                 count(*) FILTER (WHERE ended_at <= started_at) AS invalid_durations,
                 count(*) FILTER (
                     WHERE date_diff('second', started_at, ended_at) > 86400
@@ -146,23 +154,26 @@ final class RideSql {
                     WHERE %s
                       AND %s IS NOT NULL
                       AND %s IS NOT NULL
+                      AND (CAST(? AS VARCHAR) IS NULL OR %s = ?)
                     GROUP BY %s, %s
                 )
-                SELECT *, count(*) OVER () AS total_count
-                FROM grouped
-                ORDER BY %s %s NULLS LAST, station_name ASC
-                LIMIT ? OFFSET ?
                 """.formatted(
                 direction.nameColumn(), direction.idColumn(), FILTER,
-                direction.nameColumn(), direction.idColumn(),
-                direction.nameColumn(), direction.idColumn(),
-                sort.sqlColumn(), order.sqlValue());
+                direction.nameColumn(), direction.idColumn(), direction.nameColumn(),
+                direction.nameColumn(), direction.idColumn())
+                + page(sort.sqlColumn() + " " + order.sqlValue() + " NULLS LAST, station_name ASC, station_id ASC");
     }
 
     static String routes(RouteSort sort, SortDirection order) {
-        return ROUTES_BASE + "\nORDER BY " + sort.sqlColumn() + " "
-                + order.sqlValue() + " NULLS LAST, start_station_name, end_station_name"
-                + "\nLIMIT ? OFFSET ?";
+        return ROUTES_BASE + page(sort.sqlColumn() + " " + order.sqlValue()
+                + " NULLS LAST, start_station_name ASC NULLS LAST, end_station_name ASC NULLS LAST, "
+                + "start_station_id ASC, end_station_id ASC");
+    }
+
+    private static String page(String order) {
+        return "SELECT p.*, totals.total_count FROM (SELECT count(*) AS total_count FROM grouped) totals "
+                + "LEFT JOIN (SELECT * FROM grouped ORDER BY " + order + " LIMIT ? OFFSET ?) p ON true "
+                + "ORDER BY " + order;
     }
 
     private static String categorySummary(String column) {

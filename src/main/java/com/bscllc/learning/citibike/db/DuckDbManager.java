@@ -43,6 +43,7 @@ public class DuckDbManager {
         if (anchor != null) {
             return;
         }
+        validateConfiguration();
         try {
             Class.forName("org.duckdb.DuckDBDriver");
             tempDirectory = Files.createTempDirectory("duckdb-citibike-");
@@ -55,7 +56,8 @@ public class DuckDbManager {
             anchor = (DuckDBConnection) DriverManager.getConnection(JDBC_URL, properties);
             LOG.info("Started shared DuckDB instance with {} threads", config.duckdb().threads());
         } catch (ClassNotFoundException | SQLException | IOException e) {
-            throw new IllegalStateException("Unable to start DuckDB", e);
+            deleteTempDirectory();
+            throw new IllegalStateException("Unable to start DuckDB; check configured resource limits");
         }
     }
 
@@ -83,13 +85,14 @@ public class DuckDbManager {
     }
 
     public <T> T withConnection(SqlWork<T> work) {
-        if (!ready || queryConnections == null) {
+        BlockingQueue<DuckDBConnection> pool = queryConnections;
+        if (!ready || pool == null) {
             throw new DatabaseBusyException("Ride data is not ready");
         }
 
         DuckDBConnection connection;
         try {
-            connection = queryConnections.poll(
+            connection = pool.poll(
                     config.jdbc().acquireTimeout().toMillis(), TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -99,17 +102,46 @@ public class DuckDbManager {
             throw new DatabaseBusyException("DuckDB query capacity is temporarily exhausted");
         }
 
-        metrics.connectionAcquired();
+        synchronized (this) {
+            if (!ready) {
+                closeQuietly(connection);
+                throw new DatabaseBusyException("Ride data is not ready");
+            }
+            metrics.connectionAcquired();
+        }
         try {
             return work.execute(connection);
         } catch (SQLException e) {
             throw new DataAccessException("DuckDB query failed", e);
         } finally {
             metrics.connectionReleased();
-            if (!queryConnections.offer(connection)) {
-                closeQuietly(connection);
+            synchronized (this) {
+                if (!ready || !pool.offer(connection)) {
+                    closeQuietly(connection);
+                }
             }
         }
+    }
+
+    private void validateConfiguration() {
+        if (config.jdbc().queryTimeout().compareTo(java.time.Duration.ofMillis(1)) < 0
+                || config.jdbc().queryTimeout().compareTo(java.time.Duration.ofSeconds(60)) > 0
+                || config.jdbc().acquireTimeout().compareTo(java.time.Duration.ofMillis(1)) < 0
+                || config.jdbc().acquireTimeout().compareTo(java.time.Duration.ofSeconds(5)) > 0
+                || config.jdbc().maxConnections() < 1 || config.jdbc().maxConnections() > 32
+                || config.duckdb().threads() < 1 || config.duckdb().threads() > 32
+                || config.api().maxPageSize() < 1 || config.api().maxPageSize() > 100
+                || config.api().maxDateRangeDays() < 1 || config.api().maxDateRangeDays() > 366
+                || config.api().maxOffset() < 0 || config.api().maxOffset() > 1_000_000
+                || !config.duckdb().memoryLimit().matches("[1-9][0-9]*(KB|MB|GB)")
+                || !config.duckdb().maxTempDirectorySize().matches("[1-9][0-9]*(KB|MB|GB)")) {
+            throw new IllegalStateException("Invalid Citi Bike resource-limit configuration");
+        }
+    }
+
+    Path importDirectory() {
+        if (tempDirectory == null) throw new IllegalStateException("DuckDB has not been started");
+        return tempDirectory;
     }
 
     public int queryTimeoutSeconds() {
@@ -131,8 +163,10 @@ public class DuckDbManager {
 
     public synchronized void shutdown() {
         ready = false;
+        if (anchor == null && queryConnections == null && tempDirectory == null) return;
         closeConnections();
         closeQuietly(anchor);
+        LOG.info("Stopped shared DuckDB instance");
         anchor = null;
         deleteTempDirectory();
     }
@@ -157,11 +191,11 @@ public class DuckDbManager {
                 try {
                     Files.deleteIfExists(path);
                 } catch (IOException e) {
-                    LOG.debug("Unable to delete DuckDB temporary path", e);
+                    LOG.debug("Unable to delete DuckDB temporary file");
                 }
             });
         } catch (IOException e) {
-            LOG.debug("Unable to clean DuckDB temporary directory", e);
+            LOG.debug("Unable to clean DuckDB temporary directory");
         } finally {
             tempDirectory = null;
         }
@@ -174,7 +208,7 @@ public class DuckDbManager {
         try {
             connection.close();
         } catch (SQLException e) {
-            LOG.debug("Unable to close DuckDB connection", e);
+            LOG.debug("Unable to close DuckDB connection");
         }
     }
 

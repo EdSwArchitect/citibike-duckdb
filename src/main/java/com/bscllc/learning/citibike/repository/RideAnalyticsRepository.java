@@ -58,7 +58,9 @@ public class RideAnalyticsRepository {
                             result.getLong("ride_count"),
                             nullableDouble(result, "average_duration_seconds"),
                             nullableDouble(result, "median_duration_seconds"),
+                            nullableDouble(result, "p90_duration_seconds"),
                             nullableDouble(result, "p95_duration_seconds"),
+                            result.getLong("round_trip_count"),
                             result.getLong("rides_over_24_hours"));
                 }
             }
@@ -112,12 +114,13 @@ public class RideAnalyticsRepository {
 
     public PageResponse<StationActivityResponse> stations(
             RideFilter filter, StationDirection direction, StationSort sort,
-            SortDirection order, int limit, int offset) {
+            SortDirection order, int limit, int offset, String stationName) {
         return timed("stations", () -> duckDb.withConnection(connection -> {
             String sql = RideSql.stations(direction, sort, order);
             try (PreparedStatement statement = connection.prepareStatement(sql)) {
                 configure(statement);
                 int next = bindFilter(statement, filter, 1);
+                next = bindNullableStringTwice(statement, next, stationName);
                 statement.setInt(next++, limit);
                 statement.setInt(next, offset);
                 try (ResultSet result = statement.executeQuery()) {
@@ -125,6 +128,7 @@ public class RideAnalyticsRepository {
                     long total = 0;
                     while (result.next()) {
                         total = result.getLong("total_count");
+                        if (result.getString("station_id") == null) continue;
                         rows.add(new StationActivityResponse(
                                 result.getString("station_id"),
                                 result.getString("station_name"),
@@ -152,6 +156,7 @@ public class RideAnalyticsRepository {
                     long total = 0;
                     while (result.next()) {
                         total = result.getLong("total_count");
+                        if (result.getString("start_station_id") == null) continue;
                         rows.add(new RouteSummaryResponse(
                                 result.getString("start_station_id"),
                                 result.getString("start_station_name"),
@@ -182,6 +187,7 @@ public class RideAnalyticsRepository {
                     long total = 0;
                     while (result.next()) {
                         total = result.getLong("total_count");
+                        if (result.getString("station_id") == null) continue;
                         rows.add(new StationImbalanceResponse(
                                 result.getString("station_id"), result.getString("station_name"),
                                 result.getLong("starts"), result.getLong("ends"),
@@ -209,6 +215,7 @@ public class RideAnalyticsRepository {
                     return new DataQualityStats(missing,
                             result.getLong("duplicate_ride_ids"),
                             result.getLong("invalid_durations"),
+                            result.getLong("invalid_rows"),
                             result.getLong("rides_over_24_hours"));
                 }
             }
@@ -299,6 +306,7 @@ public class RideAnalyticsRepository {
             return "capacity";
         }
         if (exception instanceof DataAccessException) {
+            if (exception.getCause() instanceof java.sql.SQLTimeoutException) return "timeout";
             return "sql";
         }
         return "runtime";

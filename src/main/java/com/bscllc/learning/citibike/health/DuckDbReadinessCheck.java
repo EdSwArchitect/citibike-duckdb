@@ -28,9 +28,11 @@ public class DuckDbReadinessCheck implements HealthCheck {
         }
         try {
             boolean reachable = duckDb.withConnection(connection -> {
-                try (Statement statement = connection.createStatement();
-                     ResultSet result = statement.executeQuery("SELECT 1")) {
-                    return result.next() && result.getInt(1) == 1;
+                try (Statement statement = connection.createStatement()) {
+                    statement.setQueryTimeout(duckDb.queryTimeoutSeconds());
+                    try (ResultSet result = statement.executeQuery("SELECT 1")) {
+                        return result.next() && result.getInt(1) == 1;
+                    }
                 }
             });
             if (!reachable) {

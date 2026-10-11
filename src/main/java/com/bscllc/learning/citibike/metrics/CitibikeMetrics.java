@@ -33,6 +33,10 @@ public class CitibikeMetrics {
         return Timer.start(registry);
     }
 
+    public void recordDiscovered(int count) {
+        filesDiscovered.set(count);
+    }
+
     public void recordLoadSuccess(Timer.Sample sample, int discovered, int loaded, long rows) {
         filesDiscovered.set(discovered);
         filesLoaded.set(loaded);

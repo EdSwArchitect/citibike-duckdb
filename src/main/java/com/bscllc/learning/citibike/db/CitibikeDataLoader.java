@@ -98,7 +98,9 @@ public class CitibikeDataLoader {
         try {
             duckDb.start();
             List<CsvResource> resources = catalog.discover();
-            LOG.info("Discovered {} Citi Bike CSV resource(s)", resources.size());
+            metrics.recordDiscovered(resources.size());
+            LOG.info("Discovered {} Citi Bike CSV resource(s): {}", resources.size(),
+                    resources.stream().map(CsvResource::name).toList());
             report = load(resources);
             duckDb.activate();
             metrics.recordLoadSuccess(timer, resources.size(), report.filesLoaded(), report.totalRows());
@@ -106,6 +108,7 @@ public class CitibikeDataLoader {
                     report.totalRows(), report.filesLoaded());
         } catch (RuntimeException e) {
             metrics.recordLoadFailure(timer, failureCategory(e));
+            LOG.warn("Citi Bike startup load failed: {}", e.getMessage());
             duckDb.markNotReady();
             duckDb.shutdown();
             throw e;
@@ -120,7 +123,14 @@ public class CitibikeDataLoader {
         return current;
     }
 
-    private LoadReport load(List<CsvResource> resources) {
+    LoadReport load(List<CsvResource> resources) {
+        Set<String> names = new java.util.HashSet<>();
+        for (CsvResource resource : resources) {
+            CsvResourceCatalog.validateTopLevelName(resource.name());
+            if (!names.add(resource.name())) {
+                throw new IllegalStateException("Duplicate CSV resource name: " + resource.name());
+            }
+        }
         Connection connection = duckDb.bootstrapConnection();
         Map<String, Long> rowsBySource = new LinkedHashMap<>();
         boolean previousAutoCommit;
@@ -137,16 +147,23 @@ public class CitibikeDataLoader {
 
             for (CsvResource resource : resources) {
                 Timer.Sample fileTimer = metrics.startTimer();
+                long started = System.nanoTime();
                 try {
                     long before = countRows(connection);
                     loadOne(connection, resource);
                     long loaded = countRows(connection) - before;
+                    if (loaded == 0 && config.csv().failOnEmpty()) {
+                        throw new IllegalStateException("CSV resource has no ride rows");
+                    }
                     rowsBySource.put(resource.name(), loaded);
                     metrics.recordFileLoad(fileTimer, true);
-                    LOG.info("Loaded CSV resource {} with {} rows", resource.name(), loaded);
+                    LOG.info("Loaded CSV resource {} with {} rows in {} ms", resource.name(), loaded,
+                            (System.nanoTime() - started) / 1_000_000);
                 } catch (IOException | SQLException | RuntimeException e) {
                     metrics.recordFileLoad(fileTimer, false);
-                    throw e;
+                    String reason = e instanceof SQLException ? "CSV parse, width, or required-field validation failed"
+                            : e instanceof IOException ? "CSV resource could not be read" : e.getMessage();
+                    throw new IllegalStateException("CSV " + resource.name() + ": " + reason);
                 }
             }
 
@@ -158,21 +175,22 @@ public class CitibikeDataLoader {
             return new LoadReport(resources.size(), resources.size(),
                     rowsBySource.values().stream().mapToLong(Long::longValue).sum(),
                     rowsBySource, bounds[0], bounds[1], Instant.now());
-        } catch (SQLException | IOException | RuntimeException e) {
+        } catch (SQLException | RuntimeException e) {
             rollback(connection);
-            throw new IllegalStateException("Unable to load Citi Bike CSV resources", e);
+            throw new IllegalStateException(e instanceof IllegalStateException
+                    ? e.getMessage() : "Unable to load Citi Bike CSV resources");
         } finally {
             try {
                 connection.setAutoCommit(previousAutoCommit);
             } catch (SQLException e) {
-                LOG.warn("Unable to restore DuckDB auto-commit mode", e);
+                LOG.warn("Unable to restore DuckDB auto-commit mode");
             }
         }
     }
 
     private void loadOne(Connection connection, CsvResource resource) throws IOException, SQLException {
         validateHeader(resource);
-        Path extracted = Files.createTempFile("citibike-import-", ".csv");
+        Path extracted = Files.createTempFile(duckDb.importDirectory(), "citibike-import-", ".csv");
         try {
             try (var input = resource.openStream()) {
                 Files.copy(input, extracted, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
@@ -208,6 +226,11 @@ public class CitibikeDataLoader {
     }
 
     private void validateLoadedData(Connection connection) throws SQLException {
+        assertNoRows(connection, """
+                SELECT 1 FROM rides_staging
+                WHERE trim(ride_id) = '' OR NOT isfinite(started_at) OR NOT isfinite(ended_at)
+                LIMIT 1
+                """, "CSV contains an invalid required identifier or timestamp");
         assertNoRows(connection, """
                 SELECT 1 FROM rides_staging
                 WHERE rideable_type NOT IN ('classic_bike', 'electric_bike', 'docked_bike')
@@ -281,7 +304,7 @@ public class CitibikeDataLoader {
         try {
             connection.rollback();
         } catch (SQLException e) {
-            LOG.warn("Unable to roll back failed CSV load", e);
+            LOG.warn("Unable to roll back failed CSV load");
         }
     }
 

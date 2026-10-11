@@ -9,7 +9,7 @@
     <packaging>jar</packaging>
 
     <name>duckdb-learn</name>
-    <description>Small Java examples for loading and exploring CSV data with DuckDB.</description>
+    <description>Quarkus REST analytics for Citi Bike CSV data using DuckDB JDBC.</description>
 
     <properties>
         <maven.compiler.release>25</maven.compiler.release>
@@ -35,6 +35,10 @@
     </dependencyManagement>
 
     <dependencies>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-scheduler</artifactId>
+        </dependency>
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-rest-jackson</artifactId>
@@ -121,6 +125,24 @@
                         <goals>
                             <goal>run</goal>
                         </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <version>${surefire-plugin.version}</version>
+                <configuration>
+                    <argLine>@{argLine} --enable-native-access=ALL-UNNAMED</argLine>
+                    <systemPropertyVariables>
+                        <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
+                        <quarkus.test.arg-line>--enable-native-access=ALL-UNNAMED</quarkus.test.arg-line>
+                        <maven.home>${maven.home}</maven.home>
+                    </systemPropertyVariables>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals><goal>integration-test</goal><goal>verify</goal></goals>
                     </execution>
                 </executions>
             </plugin>
