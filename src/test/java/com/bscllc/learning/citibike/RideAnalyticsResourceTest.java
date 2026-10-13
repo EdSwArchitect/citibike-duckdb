@@ -260,7 +260,7 @@ class RideAnalyticsResourceTest {
             if (!meter.getId().getName().startsWith("citibike.")) continue;
             for (var tag : meter.getId().getTags()) {
                 org.junit.jupiter.api.Assertions.assertTrue(java.util.Set.of("operation", "outcome", "category", "reason").contains(tag.getKey()));
-                org.junit.jupiter.api.Assertions.assertTrue(java.util.Set.of("summary", "timeseries", "by-bike-type", "by-rider-type", "activity", "stations", "routes", "station-imbalance", "data-quality", "success", "failure", "capacity", "sql", "timeout", "runtime", "validation").contains(tag.getValue()));
+                org.junit.jupiter.api.Assertions.assertTrue(java.util.Set.of("summary", "timeseries", "by-bike-type", "by-rider-type", "activity", "stations", "routes", "station-imbalance", "data-quality", "success", "failure", "capacity", "sql", "timeout", "runtime", "validation", "succeeded", "unchanged", "failed", "busy", "no_match", "committed", "waiting", "overdue").contains(tag.getValue()));
             }
         }
         given().when().get("/q/health/live").then().statusCode(200).body("status", equalTo("UP"));
@@ -308,6 +308,24 @@ class RideAnalyticsResourceTest {
         for (var category : java.util.Map.of("classic_bike", 1, "electric_bike", 1, "docked_bike", 0).entrySet()) {
             given().queryParam("bikeType", category.getKey()).when().get("/api/v1/rides/summary").then().statusCode(200).body("rideCount", equalTo(category.getValue()));
         }
+    }
+
+    @Test
+    void monitoringExportsLatencyBucketsReadinessAndConfiguredLimits() {
+        given().when().get("/api/v1/rides/summary").then().statusCode(200);
+        String exported = given().when().get("/q/metrics").then().statusCode(200).extract().asString();
+        for (String name : java.util.List.of("http_server_requests_seconds_bucket",
+                "citibike_jdbc_query_duration_seconds_bucket", "citibike_analytics_ready",
+                "citibike_duckdb_memory_limit_bytes", "citibike_duckdb_spill_limit_bytes",
+                "citibike_jdbc_connections_limit", "citibike_download_enabled",
+                "citibike_download_last_success_timestamp_seconds")) {
+            org.junit.jupiter.api.Assertions.assertTrue(exported.contains(name), name);
+        }
+        org.junit.jupiter.api.Assertions.assertEquals(1, registry.get("citibike.analytics.ready").gauge().value());
+        org.junit.jupiter.api.Assertions.assertEquals(4, registry.get("citibike.jdbc.connections.limit").gauge().value());
+        org.junit.jupiter.api.Assertions.assertEquals(512000000, registry.get("citibike.duckdb.memory.limit.bytes").gauge().value());
+        org.junit.jupiter.api.Assertions.assertEquals(0, registry.get("citibike.download.enabled").gauge().value());
+        org.junit.jupiter.api.Assertions.assertTrue(Double.isNaN(registry.get("citibike.download.last.success.timestamp.seconds").gauge().value()));
     }
 
 }

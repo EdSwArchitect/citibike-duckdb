@@ -1,0 +1,172 @@
+{
+  "evaluation_interval": "15s",
+  "tests": [
+    {
+      "name": "disabled downloads have no false-success or freshness",
+      "interval": "15s",
+      "input_series": [
+        {
+          "series": "up{job=\"citibike\",instance=\"test:8080\"}",
+          "values": "1+0x4"
+        },
+        {
+          "series": "citibike_download_enabled{job=\"citibike\",instance=\"test:8080\"}",
+          "values": "0+0x4"
+        },
+        {
+          "series": "citibike_download_last_check_successful{job=\"citibike\",instance=\"test:8080\"}",
+          "values": "0+0x4"
+        }
+      ],
+      "promql_expr_test": [
+        {
+          "expr": "(citibike_download_last_check_successful{job=\"citibike\",instance=\"test:8080\"}) and on(job,instance) (citibike_download_enabled{job=\"citibike\",instance=\"test:8080\"} == 1) and on(job,instance) (up{job=\"citibike\",instance=\"test:8080\"} == 1)",
+          "eval_time": "1m",
+          "exp_samples": []
+        },
+        {
+          "expr": "(time() - (citibike_download_last_success_timestamp_seconds{job=\"citibike\",instance=\"test:8080\"} > 0)) and on(job,instance) (citibike_download_enabled{job=\"citibike\",instance=\"test:8080\"} == 1) and on(job,instance) (up{job=\"citibike\",instance=\"test:8080\"} == 1)",
+          "eval_time": "1m",
+          "exp_samples": []
+        },
+        {
+          "expr": "(citibike_download_checks_total{job=\"citibike\",instance=\"test:8080\",outcome=\"failed\"}) and on(job,instance) (citibike_download_enabled{job=\"citibike\",instance=\"test:8080\"} == 1) and on(job,instance) (up{job=\"citibike\",instance=\"test:8080\"} == 1)",
+          "eval_time": "1m",
+          "exp_samples": []
+        }
+      ]
+    },
+    {
+      "name": "no traffic has no zero latency or healthy error fraction",
+      "interval": "15s",
+      "input_series": [
+        {
+          "series": "up{job=\"citibike\",instance=\"test:8080\"}",
+          "values": "1+0x4"
+        },
+        {
+          "series": "http_server_requests_seconds_count{job=\"citibike\",instance=\"test:8080\",uri=\"/api/v1/rides/summary\",status=\"200\"}",
+          "values": "0+0x4"
+        },
+        {
+          "series": "http_server_requests_seconds_sum{job=\"citibike\",instance=\"test:8080\",uri=\"/api/v1/rides/summary\",status=\"200\"}",
+          "values": "0+0x4"
+        }
+      ],
+      "promql_expr_test": [
+        {
+          "expr": "(histogram_quantile(0.95, sum by(le) (rate(http_server_requests_seconds_bucket{job=\"citibike\",instance=\"test:8080\",uri=~\"/api/v1/.*\"}[1m]))) and on() (sum(rate(http_server_requests_seconds_count{job=\"citibike\",instance=\"test:8080\",uri=~\"/api/v1/.*\"}[1m])) > 0)) and on() (up{job=\"citibike\",instance=\"test:8080\"} == 1)",
+          "eval_time": "1m",
+          "exp_samples": []
+        },
+        {
+          "expr": "((sum(rate(http_server_requests_seconds_sum{job=\"citibike\",instance=\"test:8080\",uri=~\"/api/v1/.*\"}[1m])) / sum(rate(http_server_requests_seconds_count{job=\"citibike\",instance=\"test:8080\",uri=~\"/api/v1/.*\"}[1m]))) and on() (sum(rate(http_server_requests_seconds_count{job=\"citibike\",instance=\"test:8080\",uri=~\"/api/v1/.*\"}[1m])) > 0)) and on() (up{job=\"citibike\",instance=\"test:8080\"} == 1)",
+          "eval_time": "1m",
+          "exp_samples": []
+        },
+        {
+          "expr": "(((sum(rate(http_server_requests_seconds_count{job=\"citibike\",instance=\"test:8080\",uri=~\"/api/v1/.*\",status=~\"[45]..\"}[1m])) or on() (0 * sum(rate(http_server_requests_seconds_count{job=\"citibike\",instance=\"test:8080\",uri=~\"/api/v1/.*\"}[1m])))) / sum(rate(http_server_requests_seconds_count{job=\"citibike\",instance=\"test:8080\",uri=~\"/api/v1/.*\"}[1m]))) and on() (sum(rate(http_server_requests_seconds_count{job=\"citibike\",instance=\"test:8080\",uri=~\"/api/v1/.*\"}[1m])) > 0)) and on() (up{job=\"citibike\",instance=\"test:8080\"} == 1)",
+          "eval_time": "1m",
+          "exp_samples": []
+        }
+      ]
+    },
+    {
+      "name": "analytics remains ready during failed download check",
+      "interval": "15s",
+      "input_series": [
+        {
+          "series": "up{job=\"citibike\",instance=\"test:8080\"}",
+          "values": "1+0x4"
+        },
+        {
+          "series": "citibike_download_enabled{job=\"citibike\",instance=\"test:8080\"}",
+          "values": "1+0x4"
+        },
+        {
+          "series": "citibike_download_last_check_successful{job=\"citibike\",instance=\"test:8080\"}",
+          "values": "0+0x4"
+        },
+        {
+          "series": "citibike_analytics_ready{job=\"citibike\",instance=\"test:8080\"}",
+          "values": "1+0x4"
+        }
+      ],
+      "promql_expr_test": [
+        {
+          "expr": "(citibike_download_last_check_successful{job=\"citibike\",instance=\"test:8080\"}) and on(job,instance) (citibike_download_enabled{job=\"citibike\",instance=\"test:8080\"} == 1) and on(job,instance) (up{job=\"citibike\",instance=\"test:8080\"} == 1)",
+          "eval_time": "1m",
+          "exp_samples": [
+            {
+              "labels": "citibike_download_last_check_successful{instance=\"test:8080\",job=\"citibike\"}",
+              "value": 0
+            }
+          ]
+        },
+        {
+          "expr": "citibike_analytics_ready{job=\"citibike\",instance=\"test:8080\"} and on(job,instance) (up{job=\"citibike\",instance=\"test:8080\"} == 1)",
+          "eval_time": "1m",
+          "exp_samples": [
+            {
+              "labels": "citibike_analytics_ready{instance=\"test:8080\",job=\"citibike\"}",
+              "value": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "missing metrics do not invent readiness or freshness",
+      "interval": "15s",
+      "input_series": [],
+      "promql_expr_test": [
+        {
+          "expr": "citibike_analytics_ready{job=\"citibike\",instance=\"test:8080\"} and on(job,instance) (up{job=\"citibike\",instance=\"test:8080\"} == 1)",
+          "eval_time": "1m",
+          "exp_samples": []
+        },
+        {
+          "expr": "((sum(rate(http_server_requests_seconds_sum{job=\"citibike\",instance=\"test:8080\",uri=~\"/api/v1/.*\"}[1m])) / sum(rate(http_server_requests_seconds_count{job=\"citibike\",instance=\"test:8080\",uri=~\"/api/v1/.*\"}[1m]))) and on() (sum(rate(http_server_requests_seconds_count{job=\"citibike\",instance=\"test:8080\",uri=~\"/api/v1/.*\"}[1m])) > 0)) and on() (up{job=\"citibike\",instance=\"test:8080\"} == 1)",
+          "eval_time": "1m",
+          "exp_samples": []
+        },
+        {
+          "expr": "(time() - (citibike_download_last_success_timestamp_seconds{job=\"citibike\",instance=\"test:8080\"} > 0)) and on(job,instance) (citibike_download_enabled{job=\"citibike\",instance=\"test:8080\"} == 1) and on(job,instance) (up{job=\"citibike\",instance=\"test:8080\"} == 1)",
+          "eval_time": "1m",
+          "exp_samples": []
+        }
+      ]
+    },
+    {
+      "name": "disabled monthly ingestion is unknown rather than healthy",
+      "interval": "15s",
+      "input_series": [
+        {
+          "series": "up{job=\"citibike\",instance=\"test:8080\"}",
+          "values": "1+0x4"
+        },
+        {
+          "series": "citibike_ingestion_enabled{job=\"citibike\",instance=\"test:8080\"}",
+          "values": "0+0x4"
+        }
+      ],
+      "promql_expr_test": [
+        {
+          "expr": "(citibike_ingestion_pending{job=\"citibike\",instance=\"test:8080\"}) and on(job,instance) (citibike_ingestion_enabled{job=\"citibike\",instance=\"test:8080\"} == 1) and on(job,instance) (up{job=\"citibike\",instance=\"test:8080\"} == 1)",
+          "eval_time": "1m",
+          "exp_samples": []
+        },
+        {
+          "expr": "(time() - (citibike_ingestion_last_success_timestamp_seconds{job=\"citibike\",instance=\"test:8080\"} > 0)) and on(job,instance) (citibike_ingestion_enabled{job=\"citibike\",instance=\"test:8080\"} == 1) and on(job,instance) (up{job=\"citibike\",instance=\"test:8080\"} == 1)",
+          "eval_time": "1m",
+          "exp_samples": []
+        },
+        {
+          "expr": "(citibike_ingestion_jobs_total{job=\"citibike\",instance=\"test:8080\"}) and on(job,instance) (citibike_ingestion_enabled{job=\"citibike\",instance=\"test:8080\"} == 1) and on(job,instance) (up{job=\"citibike\",instance=\"test:8080\"} == 1)",
+          "eval_time": "1m",
+          "exp_samples": []
+        }
+      ]
+    }
+  ]
+}

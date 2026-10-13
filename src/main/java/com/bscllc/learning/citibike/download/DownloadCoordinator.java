@@ -2,6 +2,8 @@ package com.bscllc.learning.citibike.download;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Gauge;
+import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import java.io.IOException;
@@ -13,6 +15,7 @@ import java.util.concurrent.locks.ReentrantLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+@io.quarkus.runtime.Startup
 @ApplicationScoped
 public class DownloadCoordinator {
     private static final Logger LOG = LoggerFactory.getLogger(DownloadCoordinator.class);
@@ -22,6 +25,21 @@ public class DownloadCoordinator {
     private final ReentrantLock running = new ReentrantLock();
     public record Status(String outcome, String reason, String lastSuccessfulMonth, String lastSuccessfulAt, String currentAttempt) {}
     private volatile Status status = new Status("DISABLED",null,null,null,null);
+    private volatile double lastCheckTimestamp = Double.NaN;
+    private volatile double lastCheckSuccessful = Double.NaN;
+    @PostConstruct
+    void registerMonitoring() {
+        Gauge.builder("citibike.download.enabled", this, c -> c.config.enabled() ? 1 : 0).register(metrics);
+        Gauge.builder("citibike.download.active", this, c -> c.running.isLocked() ? 1 : 0).register(metrics);
+        Gauge.builder("citibike.download.last.check.timestamp.seconds", this, c -> c.lastCheckTimestamp).register(metrics);
+        Gauge.builder("citibike.download.last.check.successful", this, c -> c.lastCheckSuccessful).register(metrics);
+        Gauge.builder("citibike.download.last.success.timestamp.seconds", this, c -> {
+            String timestamp = c.status.lastSuccessfulAt();
+            return timestamp == null ? Double.NaN : Instant.parse(timestamp).getEpochSecond();
+        }).register(metrics);
+        for (String outcome : java.util.List.of("succeeded", "unchanged", "failed", "busy", "no_match"))
+            metrics.counter("citibike.download.checks", "outcome", outcome);
+    }
     public Status status() {
         if (config!=null && config.enabled() && status.outcome().equals("DISABLED"))
             return new Status("IDLE",null,null,null,null);
@@ -114,6 +132,10 @@ public class DownloadCoordinator {
         DownloadStateStore.Manifest active=null;
         if (store!=null) try { active=store.active(); if (!store.valid(active)) active=null; } catch (IOException ignored) {}
         status=new Status(outcome,reason,active==null?null:active.month(),active==null?null:active.completedAt(),null);
+        if (!outcome.equals("BUSY")) {
+            lastCheckTimestamp = Instant.now().getEpochSecond();
+            lastCheckSuccessful = outcome.equals("SUCCEEDED") || outcome.equals("UNCHANGED") ? 1 : 0;
+        }
         if (metrics!=null) metrics.counter("citibike.download.checks","outcome",outcome.toLowerCase(java.util.Locale.ROOT)).increment();
         LOG.info("Archive download outcome={} reason={}",outcome,reason);
         return outcome;

@@ -189,9 +189,17 @@ class LatestArchiveDownloadTest {
     }
     @Test void metricsUseOnlyFixedOutcomesAndStatusIsSanitized() throws Exception {
         var c=coordinator();c.metrics=new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+        c.registerMonitoring();
+        assertTrue(Double.isNaN(c.metrics.get("citibike.download.last.check.successful").gauge().value()));
+        assertTrue(Double.isNaN(c.metrics.get("citibike.download.last.success.timestamp.seconds").gauge().value()));
+        assertEquals(1,c.metrics.get("citibike.download.enabled").gauge().value());
+        assertEquals(0,c.metrics.get("citibike.download.active").gauge().value());
         assertEquals("SUCCEEDED",c.execute(http()));assertEquals("202609",c.status().lastSuccessfulMonth());
         listing="bad XML with private data";assertEquals("FAILED",c.execute(http()));
         assertEquals("INVALID_LISTING",c.status().reason());assertEquals("202609",c.status().lastSuccessfulMonth());
+        assertEquals(0,c.metrics.get("citibike.download.last.check.successful").gauge().value());
+        assertTrue(c.metrics.get("citibike.download.last.success.timestamp.seconds").gauge().value()>0);
+        overrides.put("enabled",false);assertEquals(0,c.metrics.get("citibike.download.enabled").gauge().value());
         for(var meter:c.metrics.getMeters())for(var tag:meter.getId().getTags())assertEquals("outcome",tag.getKey());
     }
 

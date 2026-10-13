@@ -2,11 +2,19 @@
 
 A Quarkus REST API for exploring Citi Bike ride data with DuckDB through JDBC.
 
-At startup, the application discovers every top-level CSV matching
-`src/main/resources/*.csv`, validates that the files use the expected Citi Bike
-schema, and loads them transactionally into a shared in-memory DuckDB database.
-The included dataset contains 1,500 rides. Invalid input files fail startup;
-readiness becomes UP only after the complete load commits.
+Production uses file-backed DuckDB and automated monthly Citi Bike ingestion.
+Verified archives are downloaded to runtime storage, safely extracted, and
+imported transactionally. Existing committed data survives restarts and failed
+updates. A new empty database becomes ready after its first successful import.
+
+Development and test profiles retain the bundled CSV demo: every top-level
+compatible resource is loaded into shared in-memory DuckDB, including the
+1,500-ride sample. The optional latest-only downloader remains available as a
+separate download-only component.
+
+See [monthly ingestion](docs/INGESTION.md),
+[Grafana monitoring](monitoring/README.md), and the
+[latest-only downloader](#latest-nyc-archive-downloader) for setup and operations.
 
 ## Requirements
 
@@ -23,7 +31,8 @@ Java 25.
 mvn quarkus:dev
 ```
 
-The API is available at `http://localhost:8080/api/v1`.
+The API is available at `http://localhost:8080/api/v1`. Development defaults to
+the bundled in-memory demo with monthly ingestion disabled.
 
 ## Build And Run
 
@@ -31,6 +40,13 @@ The API is available at `http://localhost:8080/api/v1`.
 mvn clean package
 java --enable-native-access=ALL-UNNAMED -jar target/quarkus-app/quarkus-run.jar
 ```
+
+The packaged application defaults to persistent storage under `./data/citibike`
+and asynchronous recent-month ingestion. Use a durable writable local volume
+with space for archives, extracted data, the database/WAL, spill, and backups.
+Readiness starts DOWN until a valid month commits; subsequent failures retain
+existing data. For the bundled demo instead, pass
+`-Dcitibike.storage.mode=memory -Dcitibike.ingestion.enabled=false` before `-jar`.
 
 ## Architecture
 
@@ -45,7 +61,7 @@ src/main/resources/*.csv
 generated resource index -> CSV catalog -> transactional data loader
                                               |
                                               v
-                                      shared in-memory DuckDB
+                                      DuckDB (file / demo memory)
                                               ^
                                               |
 HTTP request -> REST resource -> service -> repository -> connection manager
@@ -53,12 +69,27 @@ HTTP request -> REST resource -> service -> repository -> connection manager
                     |              |            +-- prepared SQL and query metrics
                     |              +-- validation, defaults, and allowlists
                     +-- JSON contract and HTTP status mapping
+
+authenticated / scheduled / startup monthly requests
+        |
+        v
+S3 discovery -> immutable archive cache -> bounded ZIP/CSV validation
+                                                |
+                                                v
+                                   atomic month + metadata commit
+                                   into persistent DuckDB
+
+startup / scheduled / internal manual latest-only check
+        |
+        v
+S3 object discovery -> latest archive download -> immutable ZIP + active.json
+                                                  (external runtime directory)
 ```
 
 ### Startup And Data Loading
 
 The Maven build generates a classpath index containing the top-level CSV files
-from `src/main/resources/*.csv`. At application startup:
+from `src/main/resources/*.csv`. In memory/demo mode at application startup:
 
 1. `CsvResourceCatalog` reads the index and CSVs from the application artifact
    itself. Dependency indexes and same-named CSVs cannot shadow application data.
@@ -73,10 +104,13 @@ from `src/main/resources/*.csv`. At application startup:
    invalid file rolls back the complete load and prevents the application from
    becoming ready.
 
-The database uses a named, shared in-memory DuckDB instance. This keeps the
-learning project simple and makes every startup reproducible from the bundled
-CSV resources. A file-backed database would improve restart time for larger
-datasets, but would also require schema migration and stale-data handling.
+Memory mode uses a named shared DuckDB instance and rebuilds from bundled CSVs.
+File mode migrates and opens the existing database, restoring committed source
+metadata without reloading CSVs. One dedicated writer publishes each monthly
+partition and metadata atomically; the bounded query pool reads committed data.
+An ownership lock prevents a second writable process from sharing the directory.
+An explicitly enabled one-month bundled bootstrap can seed an empty file store
+and is replaced by a later full import for the same month.
 
 ### Request Flow
 
@@ -89,9 +123,11 @@ datasets, but would also require schema migration and stale-data handling.
 | `dto` | Defines stable response records serialized by Jackson. |
 | `validation` | Defines enum-like API choices and request validation errors. |
 | `metrics` and `health` | Records bounded-cardinality metrics and exposes DuckDB readiness checks. |
+| `ingestion` | Owns month discovery, safe extraction, durable jobs, atomic replacement, catch-up/backfill, retention, and operational metrics. |
+| `download` | Discovers the latest NYC archive, streams downloads, publishes durable state, schedules checks, and exposes read-only status. |
 
 Quarkus handles concurrent HTTP requests, while `DuckDbManager` limits database
-work to a small pool of connections sharing the same in-memory database.
+work to a small pool of connections sharing the same database.
 Connection acquisition and statement execution are both time-bounded, and
 resource limits constrain DuckDB memory, threads, and temporary storage.
 
@@ -118,7 +154,8 @@ integration and repository coverage under
 
 ## Add Data
 
-Place compatible Citi Bike CSV files directly in `src/main/resources` and
+For production, use the [monthly ingestion pipeline](docs/INGESTION.md), which
+requires no application rebuild. For the bundled memory/demo mode, place compatible Citi Bike CSV files directly in `src/main/resources` and
 rebuild the application. Files in nested directories are not loaded.
 
 Every file must use this header:
@@ -144,8 +181,9 @@ never partially replaced.
 | `GET /api/v1/routes` | Paginated popular station pairs |
 | `GET /api/v1/stations/imbalance` | Station starts-minus-ends imbalance |
 | `GET /api/v1/data-quality` | File provenance and data-quality totals |
+| `GET /api/v1/download/status` | Downloader outcome, current attempt, and last successful download |
 
-Common filters are `from`, `to`, `riderType`, and `bikeType`. Dates use
+Analytics filters are `from`, `to`, `riderType`, and `bikeType`. Dates use
 `yyyy-MM-dd`. Paginated endpoints accept `limit` from 1 to 100 and a
 non-negative `offset` up to the configured maximum (10,000 by default).
 Empty pages retain the total number of matching groups.
@@ -155,6 +193,8 @@ without a UTC offset. The API preserves these local values; it does not convert
 them into UTC instants. Date ranges include both requested calendar days, using
 an inclusive start and an exclusive boundary at midnight after `to`. Defaults
 use the loaded date bounds, and ranges are limited to 366 days by default.
+Once history spans more than 366 days, supply explicit `from`/`to` windows; an
+over-wide inferred default continues to return `400`.
 
 `/rides/summary` reports average, p50 (`medianDurationSeconds`), p90, and p95
 durations in seconds, `roundTripCount` (matching non-null station IDs), and
@@ -196,6 +236,10 @@ not accept arbitrary SQL, identifiers, or file paths.
 - Readiness: `GET /q/health/ready`
 - Liveness: `GET /q/health/live`
 - Prometheus metrics: `GET /q/metrics`
+- Download status: `GET /api/v1/download/status`
+
+Downloader failures are reported independently of analytics readiness. A healthy
+DuckDB dataset can remain available while the most recent download check fails.
 
 Application code logs through SLF4J. Quarkus routes those messages to its JBoss
 Log Manager backend so application and framework logs use one configuration.
@@ -203,7 +247,11 @@ Log Manager backend so application and framework logs use one configuration.
 ## Resource Limits
 
 All settings use the `citibike` prefix in `application.properties` or equivalent
-Quarkus environment/system-property configuration. Invalid limits fail startup.
+Quarkus environment/system-property configuration. Invalid analytics limits
+fail startup. Downloader numeric and duration limits are checked when a
+download check runs; invalid bounds produce a failed check independently of
+analytics readiness. Malformed configuration values, cron expressions, or time
+zones can still prevent application startup.
 
 | Setting | Default | Accepted bounds |
 | --- | --- | --- |
@@ -212,7 +260,7 @@ Quarkus environment/system-property configuration. Invalid limits fail startup.
 | `jdbc.query-timeout` | 2s | 1ms–60s; JDBC rounds up to whole seconds |
 | `duckdb.threads` | 4 | 1–32 |
 | `duckdb.memory-limit` | 512MB | Positive integer with KB, MB, or GB suffix |
-| `duckdb.max-temp-directory-size` | 512MB | Positive integer with KB, MB, or GB suffix |
+| `duckdb.max-temp-directory-size` | 8GB production; 512MB dev/test | Positive integer with KB, MB, or GB suffix |
 | `api.max-date-range-days` | 366 | 1–366 |
 | `api.max-page-size` | 100 | 1–100 |
 | `api.max-offset` | 10000 | 0–1000000 |
@@ -241,7 +289,7 @@ IDs, dependency isolation, deterministic sorting, empty-page totals, strict
 validation, prepared station searches, real statement cancellation, connection
 cleanup, saturation/503, readiness, bounded metric tags, and sanitized logs.
 
-Run the complete build including a fast-JAR integration test:
+Run the complete build including packaged API and downloader subprocess tests:
 
 ```sh
 mvn clean verify
@@ -260,18 +308,120 @@ It stops its application processes and removes the temporary copy afterward.
 See [PLAN.md](PLAN.md) for the architecture, design decisions, and acceptance
 criteria.
 
+## Grafana And Prometheus Monitoring
+
+The repository includes a local Docker Compose monitoring stack with six
+provisioned dashboards: API, DuckDB, CSV loading, archive downloads, monthly
+ingestion, and JVM.
+Prometheus scrapes the application's existing `/q/metrics` endpoint while the
+application runs outside Docker.
+
+Start the application as described above, then initialize monitoring from the
+repository root:
+
+```sh
+test -f monitoring/.env || cp monitoring/.env.example monitoring/.env
+mkdir -p monitoring/.secrets
+chmod 700 monitoring/.secrets
+test -s monitoring/.secrets/grafana-admin-password || \
+  openssl rand -hex 32 > monitoring/.secrets/grafana-admin-password
+chmod 444 monitoring/.secrets/grafana-admin-password
+docker compose --env-file monitoring/.env -f monitoring/compose.yaml up -d
+```
+
+Generate credentials only on first setup. Open [Grafana](http://localhost:3000)
+and sign in as `admin` using the generated credential file. Dashboards appear
+in the **Citi Bike** folder. [Prometheus](http://localhost:9090) defaults to
+scraping `host.docker.internal:8080`; use a local target override for another
+application port. Grafana credentials and local overrides are ignored by Git.
+Named volumes preserve monitoring data across `down`/`up`.
+
+Downloader failure is displayed separately from analytics readiness. Disabled
+downloads and unknown freshness do not appear healthy. Latency/error fractions
+remain absent when traffic is insufficient; resource panels show configured
+DuckDB ceilings rather than measured native memory usage. Each metrics scrape
+runs one bounded readiness probe.
+
+See [monitoring/README.md](monitoring/README.md) for application connectivity,
+configuration, credentials, shutdown, persistent volumes, troubleshooting,
+Prometheus/PromQL checks, and end-to-end verification:
+
+```sh
+python3 scripts/verify_monitoring.py --generate-traffic
+```
+
+## Automated Monthly Ingestion
+
+The monthly scheduler requests the previous complete month on the 6th at 04:00
+America/New_York. Daily catch-up at 04:30 checks a bounded recent window for
+publication delays and corrections. NYC is the default; Jersey City requires
+explicit configuration. Historical backfill and manual requests use the same
+durable queue and atomic import pipeline.
+
+Administrative routes under `/api/v1/admin/ingestion` require the
+`ingestion-admin` role and `citibike.ingestion.admin-enabled=true`. No users or
+passwords are bundled. [docs/INGESTION.md](docs/INGESTION.md) describes secure
+configuration, protected requests, quotas, scheduling while stopped, migrations,
+backup/restore, archive retention, validation policy, and storage trade-offs.
+
+The complete September 2026 NYC archive was profiled and imported: **4,982,855
+rides across five CSVs**, retaining 2,917 paired missing start coordinates and
+549 trips starting before September but ending within it. File imports use the
+versioned `monthly-v2` policy; memory/demo validation remains strict. Invalid
+values, duplicates, unpaired coordinates, unsupported historical schemas, and
+non-positive durations still reject the entire candidate month.
+
+Verify packaged ingestion against small local fixtures without public downloads:
+
+```sh
+mvn verify
+python3 scripts/verify_monthly_ingestion.py
+```
+
+Back up a stopped database and all retained archives, then restore to a fresh
+directory:
+
+```sh
+python3 scripts/backup_ingestion.py ./data/citibike /path/to/new-backup
+python3 scripts/backup_ingestion.py /path/to/new-backup /path/to/restored-data --restore
+```
+
 ## Latest NYC Archive Downloader
 
 An optional component downloads the latest published NYC monthly archive without
-extracting it or loading it into DuckDB. The analytics API continues to use its
-bundled CSVs. Enable it with:
+extracting it or loading it into DuckDB. The archive-only component never changes the analytics dataset; the monthly
+ingestion pipeline manages production data independently. [Citi Bike's archive index](https://s3.amazonaws.com/tripdata/index.html)
+is the browsing entry point; the component uses the S3 listing API directly.
+
+### Enable And Run
+
+Build with `mvn clean package`, then enable downloads using a writable durable
+directory. This local example uses the default directory, which is ignored by
+Git:
 
 ```sh
+mkdir -p ./data/citibike-downloads
 java --enable-native-access=ALL-UNNAMED \
   -Dcitibike.download.enabled=true \
-  -Dcitibike.download.data-directory=/var/lib/citibike/downloads \
+  -Dcitibike.download.data-directory=./data/citibike-downloads \
   -jar target/quarkus-app/quarkus-run.jar
 ```
+
+For deployment, set `citibike.download.data-directory` to an absolute path on
+a durable writable volume owned by the application user. The directory must
+have room for both the previous archive and the candidate download, plus the
+configured free-space reserve.
+
+To enable it in development:
+
+```sh
+mvn quarkus:dev -Dcitibike.download.enabled=true
+```
+
+Equivalent environment variables include `CITIBIKE_DOWNLOAD_ENABLED=true` and
+`CITIBIKE_DOWNLOAD_DATA_DIRECTORY=/var/lib/citibike/downloads`.
+
+### Selection And Scheduling
 
 Discovery uses the public S3 ListObjectsV2 API, follows all pages, and accepts
 only full object keys matching `^[0-9]{6}-citibike-tripdata\.zip$` with a valid
@@ -283,11 +433,16 @@ The default daily check runs at 04:00 America/New_York, with an asynchronous
 startup check. Only a changed latest object needs a body download. Nothing runs
 while the application is stopped; restarting checks the latest object once and
 intentionally skips intervening months. Use `schedule=off` to disable periodic
-checks. The internal CDI method `DownloadCoordinator.checkLatest()` provides a
-manual trigger using exactly the same pipeline. No public mutation endpoint is
+checks; startup checks still run unless
+`citibike.download.check-on-startup=false`. Setting
+`citibike.download.enabled=false` disables startup, scheduled, and internal
+manual downloads. The internal CDI method
+`DownloadCoordinator.checkLatest()` provides a manual trigger using exactly the same pipeline. No public mutation endpoint is
 provided. Read sanitized status at `GET /api/v1/download/status`; it cannot
 start downloads. Check outcomes are also counted by `citibike.download.checks`
 with fixed `outcome` tags. Download errors do not affect DuckDB readiness.
+
+### Configuration
 
 All settings below use the prefix `citibike.download.`. Byte limits are numeric
 bytes; duration values use SmallRye duration syntax (`10s`, `45m`, `24h`).
@@ -306,6 +461,46 @@ bytes; duration values use SmallRye duration syntax (`10s`, `45m`, `24h`).
 | `min-free-disk-bytes` | `8589934592` (8 GiB reserve) |
 | `retained-generations`, `retained-attempts` | `2`, `100` |
 | `cleanup-grace-period` | `24h` |
+
+### Status And Troubleshooting
+
+```sh
+curl http://localhost:8080/api/v1/download/status
+```
+
+The response contains `outcome`, `reason`, `lastSuccessfulMonth`,
+`lastSuccessfulAt`, and `currentAttempt`. Months use `YYYYMM`; timestamps use
+ISO-8601 instants. Optional fields can be null or omitted. The response exposes
+no source URLs, local filesystem paths, or raw exception messages.
+
+| Outcome | Meaning |
+| --- | --- |
+| `DISABLED` | Downloading is disabled. |
+| `IDLE` | Enabled, but no check has started in this process. |
+| `DISCOVERING`, `DOWNLOADING` | A check is running; `currentAttempt` identifies it. |
+| `SUCCEEDED` | The latest archive and manifest were successfully published. |
+| `UNCHANGED` | Upstream identity and the retained archive were verified; no body download was needed. |
+| `NO_MATCH` | A complete listing contained no supported monthly key. |
+| `BUSY` | Another check or process owns the download lock. |
+| `FAILED` | The check failed; inspect its sanitized `reason` and logs. |
+
+Status is maintained in memory for this process. Durable attempt history and
+last success are stored in the data directory. After restart, status reflects
+prior success once a check reconciles that state; with startup checks disabled,
+it remains `IDLE` until a scheduled or internal manual check runs. An overlapping
+in-process request returns `BUSY` to its caller while status continues to show
+the active check. Recovery records can also report `INTERRUPTED` in attempt
+files.
+
+For `SIZE_LIMIT`, review the latest archive size and `max-download-bytes`. For
+`DISK_SPACE`, free space or enlarge the durable volume while preserving the
+active generation. For `LOCKED`, identify the process using this directory.
+`INVALID_LISTING` or `INVALID_PAGINATION` means discovery could not safely
+select the latest object; retry a check rather than choosing an older archive.
+`CHECKSUM_MISMATCH`, `TRUNCATED`, or `DEADLINE` means the candidate was not
+published. Subsequent polls use the same bounded pipeline.
+
+### Storage, Recovery, And Deployment
 
 Use a durable, trusted, locally owned directory with reliable file locking,
 atomic moves, and directory/file sync. One instance owns a directory per check;
@@ -341,14 +536,30 @@ of archives can remain. Disk reserve checks protect space for new downloads;
 monitor volume growth and failure status. A full/corrupt/unwritable volume
 prevents publication while preserving the existing manifest.
 
-For backup, pause checks/cleanup, copy `active.json` and its referenced archive
-together, and verify the recorded SHA-256 after restore. Consumers should read
-the manifest once, then open that generation. Complete reads within the cleanup
+For backup, stop the application so checks and cleanup cannot run, copy
+`active.json` and its referenced archive together, and verify the recorded
+SHA-256 after restore before restarting with the restored directory. Consumers
+should read the manifest once, then open that generation. Complete reads within the cleanup
 grace period or pause cleanup during long reads/backups. Do not use this archive
 cache as the application analytics database.
+
+### Verification
 
 Downloader verification is part of `mvn verify`: local stub tests cover strict
 pagination/selection, delayed publication, retries, integrity failures,
 idempotency, revisions, locking, atomic manifests, retention, and recovery.
 Packaged subprocess tests cover restart, abrupt process termination, and
 cross-process lock exclusion without downloading public S3 archives.
+
+Run just the deterministic downloader tests with:
+
+```sh
+mvn test -Dtest=LatestArchiveDownloadTest
+```
+
+The implementation verification recorded on October 10, 2026 passed 71
+unit/application tests and 2 integration tests, including 21 downloader stub
+tests. These are recorded results, not a live S3 smoke test; no public archive
+body was downloaded during verification. The broader monthly ingestion,
+backfill, extraction, and persistent DuckDB extension is now implemented; its
+separate validation and verification evidence is recorded in PLAN.md.

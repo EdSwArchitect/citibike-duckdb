@@ -13,6 +13,7 @@ public final class TestSupport {
     public static CitibikeConfig config(Map<String, String> overrides) {
         SmallRyeConfigBuilder builder = new SmallRyeConfigBuilder().withMapping(CitibikeConfig.class)
                 .withConverter(java.time.Duration.class, 100, new io.quarkus.runtime.configuration.DurationConverter());
+        builder.withDefaultValue("citibike.storage.mode", "memory");
         overrides.forEach(builder::withDefaultValue);
         return builder.build().getConfigMapping(CitibikeConfig.class);
     }

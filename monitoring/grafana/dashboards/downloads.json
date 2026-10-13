@@ -1,0 +1,665 @@
+{
+  "uid": "citibike-downloads",
+  "title": "Citi Bike / Latest archive downloads",
+  "description": "Downloader failure is separate from analytics readiness. Disabled panels show no samples. Timestamps remain unknown until a check; last publication age may grow during unchanged checks. No archive month/key is a label.",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "tags": [
+    "citibike"
+  ],
+  "timezone": "browser",
+  "refresh": "15s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "title": "Prometheus scrape",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "citibike-prometheus"
+      },
+      "description": "Scrape reachability only; not analytics readiness.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "up{job=\"citibike\",instance=\"$instance\"}",
+          "legendFormat": "{{instance}}",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unknown / no samples",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "Unreachable",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "Reachable",
+                  "color": "green"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "id": 1,
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "title": "Analytics readiness",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "citibike-prometheus"
+      },
+      "description": "One bounded DuckDB readiness probe per metrics scrape; independent of downloader status.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "citibike_analytics_ready{job=\"citibike\",instance=\"$instance\"} and on(job,instance) (up{job=\"citibike\",instance=\"$instance\"} == 1)",
+          "legendFormat": "{{instance}}",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unknown / no samples",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "Not ready",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "Ready",
+                  "color": "green"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "id": 2,
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "title": "Downloader enabled",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "citibike-prometheus"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(citibike_download_enabled{job=\"citibike\",instance=\"$instance\"}) and on() (up{job=\"citibike\",instance=\"$instance\"} == 1)",
+          "legendFormat": "{{instance}}",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unknown / no samples",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "Disabled",
+                  "color": "gray"
+                },
+                "1": {
+                  "text": "Enabled",
+                  "color": "blue"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "id": 3,
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "title": "Check active",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "citibike-prometheus"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(citibike_download_active{job=\"citibike\",instance=\"$instance\"}) and on(job,instance) (citibike_download_enabled{job=\"citibike\",instance=\"$instance\"} == 1) and on(job,instance) (up{job=\"citibike\",instance=\"$instance\"} == 1)",
+          "legendFormat": "{{instance}}",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unknown / no samples",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "Idle",
+                  "color": "blue"
+                },
+                "1": {
+                  "text": "Running",
+                  "color": "blue"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "id": 4,
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "title": "Last completed check",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "citibike-prometheus"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(citibike_download_last_check_successful{job=\"citibike\",instance=\"$instance\"}) and on(job,instance) (citibike_download_enabled{job=\"citibike\",instance=\"$instance\"} == 1) and on(job,instance) (up{job=\"citibike\",instance=\"$instance\"} == 1)",
+          "legendFormat": "{{instance}}",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unknown / no samples",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "Failed / no match",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "Verified / published",
+                  "color": "green"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "id": 5,
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "title": "Age of last completed check",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "citibike-prometheus"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(time() - (citibike_download_last_check_timestamp_seconds{job=\"citibike\",instance=\"$instance\"} > 0)) and on(job,instance) (citibike_download_enabled{job=\"citibike\",instance=\"$instance\"} == 1) and on(job,instance) (up{job=\"citibike\",instance=\"$instance\"} == 1)",
+          "legendFormat": "{{instance}}",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "Unknown / no samples",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "id": 6,
+      "gridPos": {
+        "x": 12,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "title": "Age of last archive publication",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "citibike-prometheus"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(time() - (citibike_download_last_success_timestamp_seconds{job=\"citibike\",instance=\"$instance\"} > 0)) and on(job,instance) (citibike_download_enabled{job=\"citibike\",instance=\"$instance\"} == 1) and on(job,instance) (up{job=\"citibike\",instance=\"$instance\"} == 1)",
+          "legendFormat": "{{instance}}",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "Unknown / no samples",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "id": 7,
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "title": "Checks by outcome since process start",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "citibike-prometheus"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(citibike_download_checks_total{job=\"citibike\",instance=\"$instance\"}) and on(job,instance) (citibike_download_enabled{job=\"citibike\",instance=\"$instance\"} == 1) and on(job,instance) (up{job=\"citibike\",instance=\"$instance\"} == 1)",
+          "legendFormat": "{{outcome}}",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unknown / no samples",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "id": 8,
+      "gridPos": {
+        "x": 12,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "title": "Failed checks since process start",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "citibike-prometheus"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(citibike_download_checks_total{job=\"citibike\",instance=\"$instance\",outcome=\"failed\"}) and on(job,instance) (citibike_download_enabled{job=\"citibike\",instance=\"$instance\"} == 1) and on(job,instance) (up{job=\"citibike\",instance=\"$instance\"} == 1)",
+          "legendFormat": "{{instance}}",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unknown / no samples",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "id": 9,
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "title": "Check outcomes / second",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "citibike-prometheus"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(rate(citibike_download_checks_total{job=\"citibike\",instance=\"$instance\"}[$__rate_interval])) and on(job,instance) (citibike_download_enabled{job=\"citibike\",instance=\"$instance\"} == 1) and on(job,instance) (up{job=\"citibike\",instance=\"$instance\"} == 1)",
+          "legendFormat": "{{outcome}}",
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "noValue": "Unknown / no samples",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "id": 10,
+      "gridPos": {
+        "x": 12,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      }
+    }
+  ],
+  "links": [
+    {
+      "title": "API",
+      "type": "link",
+      "url": "/d/citibike-api",
+      "keepTime": true,
+      "includeVars": true
+    },
+    {
+      "title": "DuckDB",
+      "type": "link",
+      "url": "/d/citibike-duckdb",
+      "keepTime": true,
+      "includeVars": true
+    },
+    {
+      "title": "CSV loading",
+      "type": "link",
+      "url": "/d/citibike-csv",
+      "keepTime": true,
+      "includeVars": true
+    },
+    {
+      "title": "Archive downloads",
+      "type": "link",
+      "url": "/d/citibike-downloads",
+      "keepTime": true,
+      "includeVars": true
+    },
+    {
+      "title": "JVM",
+      "type": "link",
+      "url": "/d/citibike-jvm",
+      "keepTime": true,
+      "includeVars": true
+    },
+    {
+      "title": "Monthly ingestion",
+      "type": "link",
+      "url": "/d/citibike-ingestion",
+      "keepTime": true,
+      "includeVars": true
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "instance",
+        "type": "query",
+        "label": "Application instance",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "citibike-prometheus"
+        },
+        "query": "label_values(up{job=\"citibike\"}, instance)",
+        "refresh": 1,
+        "multi": false,
+        "includeAll": false,
+        "sort": 1,
+        "options": []
+      }
+    ]
+  }
+}

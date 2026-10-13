@@ -1,0 +1,508 @@
+{
+  "uid": "citibike-api",
+  "title": "Citi Bike / API traffic and latency",
+  "description": "Rates need at least two scrapes. Latency/error fractions are absent when no requests occur. Percentiles are histogram estimates.",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "tags": [
+    "citibike"
+  ],
+  "timezone": "browser",
+  "refresh": "15s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "title": "Prometheus scrape",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "citibike-prometheus"
+      },
+      "description": "Scrape reachability only; not analytics readiness.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "up{job=\"citibike\",instance=\"$instance\"}",
+          "legendFormat": "{{instance}}",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unknown / no samples",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "Unreachable",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "Reachable",
+                  "color": "green"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "id": 1,
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "title": "Analytics readiness",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "citibike-prometheus"
+      },
+      "description": "One bounded DuckDB readiness probe per metrics scrape; independent of downloader status.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "citibike_analytics_ready{job=\"citibike\",instance=\"$instance\"} and on(job,instance) (up{job=\"citibike\",instance=\"$instance\"} == 1)",
+          "legendFormat": "{{instance}}",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unknown / no samples",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "Not ready",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "Ready",
+                  "color": "green"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "id": 2,
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "title": "API requests / second",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "citibike-prometheus"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(sum(rate(http_server_requests_seconds_count{job=\"citibike\",instance=\"$instance\",uri=~\"/api/v1/.*\"}[$__rate_interval]))) and on() (up{job=\"citibike\",instance=\"$instance\"} == 1)",
+          "legendFormat": "{{instance}}",
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "noValue": "Unknown / no samples",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "id": 3,
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "title": "Requests by endpoint and status",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "citibike-prometheus"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(sum by(uri,status) (rate(http_server_requests_seconds_count{job=\"citibike\",instance=\"$instance\",uri=~\"/api/v1/.*\"}[$__rate_interval]))) and on() (up{job=\"citibike\",instance=\"$instance\"} == 1)",
+          "legendFormat": "{{uri}} {{status}}",
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "noValue": "Unknown / no samples",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "id": 4,
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "title": "4xx + 5xx error fraction",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "citibike-prometheus"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(((sum(rate(http_server_requests_seconds_count{job=\"citibike\",instance=\"$instance\",uri=~\"/api/v1/.*\",status=~\"[45]..\"}[$__rate_interval])) or on() (0 * sum(rate(http_server_requests_seconds_count{job=\"citibike\",instance=\"$instance\",uri=~\"/api/v1/.*\"}[$__rate_interval])))) / sum(rate(http_server_requests_seconds_count{job=\"citibike\",instance=\"$instance\",uri=~\"/api/v1/.*\"}[$__rate_interval]))) and on() (sum(rate(http_server_requests_seconds_count{job=\"citibike\",instance=\"$instance\",uri=~\"/api/v1/.*\"}[$__rate_interval])) > 0)) and on() (up{job=\"citibike\",instance=\"$instance\"} == 1)",
+          "legendFormat": "{{instance}}",
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "noValue": "Unknown / no samples",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "id": 5,
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "title": "API mean latency",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "citibike-prometheus"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "((sum(rate(http_server_requests_seconds_sum{job=\"citibike\",instance=\"$instance\",uri=~\"/api/v1/.*\"}[$__rate_interval])) / sum(rate(http_server_requests_seconds_count{job=\"citibike\",instance=\"$instance\",uri=~\"/api/v1/.*\"}[$__rate_interval]))) and on() (sum(rate(http_server_requests_seconds_count{job=\"citibike\",instance=\"$instance\",uri=~\"/api/v1/.*\"}[$__rate_interval])) > 0)) and on() (up{job=\"citibike\",instance=\"$instance\"} == 1)",
+          "legendFormat": "{{instance}}",
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "Unknown / no samples",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "id": 6,
+      "gridPos": {
+        "x": 12,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "title": "API p95 latency",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "citibike-prometheus"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(histogram_quantile(0.95, sum by(le) (rate(http_server_requests_seconds_bucket{job=\"citibike\",instance=\"$instance\",uri=~\"/api/v1/.*\"}[$__rate_interval]))) and on() (sum(rate(http_server_requests_seconds_count{job=\"citibike\",instance=\"$instance\",uri=~\"/api/v1/.*\"}[$__rate_interval])) > 0)) and on() (up{job=\"citibike\",instance=\"$instance\"} == 1)",
+          "legendFormat": "{{instance}}",
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "Unknown / no samples",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "id": 7,
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "title": "API p99 latency",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "citibike-prometheus"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(histogram_quantile(0.99, sum by(le) (rate(http_server_requests_seconds_bucket{job=\"citibike\",instance=\"$instance\",uri=~\"/api/v1/.*\"}[$__rate_interval]))) and on() (sum(rate(http_server_requests_seconds_count{job=\"citibike\",instance=\"$instance\",uri=~\"/api/v1/.*\"}[$__rate_interval])) > 0)) and on() (up{job=\"citibike\",instance=\"$instance\"} == 1)",
+          "legendFormat": "{{instance}}",
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "Unknown / no samples",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "id": 8,
+      "gridPos": {
+        "x": 12,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      }
+    }
+  ],
+  "links": [
+    {
+      "title": "API",
+      "type": "link",
+      "url": "/d/citibike-api",
+      "keepTime": true,
+      "includeVars": true
+    },
+    {
+      "title": "DuckDB",
+      "type": "link",
+      "url": "/d/citibike-duckdb",
+      "keepTime": true,
+      "includeVars": true
+    },
+    {
+      "title": "CSV loading",
+      "type": "link",
+      "url": "/d/citibike-csv",
+      "keepTime": true,
+      "includeVars": true
+    },
+    {
+      "title": "Archive downloads",
+      "type": "link",
+      "url": "/d/citibike-downloads",
+      "keepTime": true,
+      "includeVars": true
+    },
+    {
+      "title": "JVM",
+      "type": "link",
+      "url": "/d/citibike-jvm",
+      "keepTime": true,
+      "includeVars": true
+    },
+    {
+      "title": "Monthly ingestion",
+      "type": "link",
+      "url": "/d/citibike-ingestion",
+      "keepTime": true,
+      "includeVars": true
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "instance",
+        "type": "query",
+        "label": "Application instance",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "citibike-prometheus"
+        },
+        "query": "label_values(up{job=\"citibike\"}, instance)",
+        "refresh": 1,
+        "multi": false,
+        "includeAll": false,
+        "sort": 1,
+        "options": []
+      }
+    ]
+  }
+}

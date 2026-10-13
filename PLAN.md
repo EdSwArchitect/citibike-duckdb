@@ -12,12 +12,10 @@ logging, metrics, health checks, and testing.
 
 The sections through the original completion evidence describe the completed
 **Phase 1: bundled CSV analytics API**. **Latest published NYC archive downloader**, below, is the current implemented
-extension. **Phase 2: monthly ingestion and durable storage** is retained as a
-separate deferred proposal. Phase 2 was documented on October 10, 2026 and
-remains unimplemented. The subsequent implementation adds only the downloader,
-its scheduler/configuration, status, tests, and documentation. It does not
-change the in-memory startup design. Phase 2 would supersede that design only
-if separately implemented.
+extension. **Phase 2: monthly ingestion and durable storage** was proposed on October 10,
+2026 and implemented on October 12, 2026. Production now uses persistent storage
+and the shared monthly ingestion pipeline. Memory mode remains available for
+development/demo tests; the latest-only downloader remains independent.
 
 ## Starting Repository (Before Implementation)
 
@@ -574,7 +572,7 @@ of the bundled CSV analytics pipeline described in README.md and implemented by
 `CsvResourceCatalog`, `CitibikeDataLoader`, and `DuckDbManager`. Downloading a ZIP
 does not make its rides available through the analytics API.
 
-The broader Phase 2 proposal below is retained as a separate, deferred design.
+Phase 2 below is a separate implemented pipeline.
 Its previous-complete-month scheduling, Jersey City inclusion, catch-up imports,
 historical backfills, nested annual archives, extraction, CSV validation,
 DuckDB migration/loading, row counts, and transactional ride replacement do
@@ -582,8 +580,7 @@ DuckDB migration/loading, row counts, and transactional ride replacement do
 change and does not activate Phase 2. Existing endpoints, startup loading,
 prepared statements, query limits, metrics, and database readiness remain as
 implemented. The earlier documentation-only update is followed by downloader implementation,
-configuration, README instructions, and verification. The deferred ingestion
-proposal remains unimplemented.
+configuration, README instructions, and verification. The ingestion extension was subsequently implemented independently.
 
 ### Programmatic Discovery And Exact Latest Selection
 
@@ -821,7 +818,7 @@ archive was downloaded for verification.
   file/directory sync, and process locks. Distributed directory sharing and
   archive extraction/analytics ingestion are outside this component.
 
-## Phase 2: Monthly Ingestion And Durable Storage — Deferred Proposal
+## Phase 2: Monthly Ingestion And Durable Storage — Implemented
 
 ### Scope And Recommendation
 
@@ -903,7 +900,7 @@ dates, and no fixed publication day is assumed. Official
 also describes multiple CSVs within an archive and a different historical
 schema. Header inspection alone does not establish full-file data validity.
 
-Implement an `ArchiveCatalog` using anonymous HTTPS listing requests, with no
+The implemented `ArchiveCatalog` using anonymous HTTPS listing requests, with no
 AWS credentials required for the public bucket:
 
 1. Request relevant year/month prefixes, including the annual NYC fallback,
@@ -1059,8 +1056,8 @@ just ZIP declarations. Apply budgets across both ZIP layers, including nested
 ZIP materialization. Reject truncated streams and CRC failures. Clean job
 directories after failure/success while retaining referenced verified archives.
 
-Proposed, configurable starting settings (validate and benchmark during
-implementation; these are not additions to application.properties in this edit):
+Implemented configurable settings (production defaults; memory-mode overrides
+retain the demo/test behavior):
 
 | Setting | Proposed default |
 | --- | --- |
@@ -1207,10 +1204,43 @@ Test restoring the database, manifests, and source cache, and document quotas,
 retention, ownership, disk alerts, restart catch-up, and manual retry operations.
 Avoid claiming deletion automatically shrinks the physical database file.
 
-### Planned Components And Implementation Order
+### Full-Archive Policy Reconciliation — Monthly V2
 
-Proposed components under `com.bscllc.learning.citibike`, to be implemented only
-after this planning task:
+Full September 2026 NYC profiling found 4,982,855 rides in five CSVs, including
+2,917 paired missing start coordinates and 549 rides starting in August but
+ending in September. All rows overlap September; there are no unpaired
+coordinates, malformed timestamps, unsupported categories, duplicate IDs,
+non-positive durations, or out-of-range coordinates. Retain those records;
+do not fabricate coordinates or discard boundary trips.
+
+This evidence supersedes the earlier strict start-coordinate and start-month
+ownership assumptions for file-mode ingestion: `monthly-v2` allows paired null
+start coordinates and requires month overlap (`ended_at >= month_start` and
+`started_at < next_month_start`). Schema migration 2 makes start coordinates
+nullable. The bundled memory loader retains its original strict requirement.
+API data-quality field names remain unchanged; management coverage reports the
+paired missing-coordinate count. Other validation/duplicate/outlier rules remain
+in force, and unsupported legacy schemas still require explicit conversion.
+
+Persistent storage is the production default; development/test profiles use
+memory mode. Startup reconstructs committed metadata and does not replace
+history. Dedicated writer work is serialized; administrative writer contention
+is bounded and can return 503 while queries use their separate pool. Durable
+attempt rows preserve interruption history. A normal queue-drain race is
+rechecked immediately; a database drain error waits for the bounded queue poll.
+Catch-up rotates through the recent window so a small per-run cap does not
+starve newer months. Missing publication becomes overdue after the configured
+window and then requires a manual retry.
+
+Superseded cache deletion waits for retention and a fully verified backup
+receipt. Active partitions and nonterminal jobs pin their archives. Terminal
+audit identities remain durable; pruned bytes remain in backup. No receipt or
+an incomplete/corrupt backup means no eviction. See `docs/INGESTION.md` for
+security, configuration, deployment, backup/restore, and operational procedures.
+
+### Implemented Components And Implementation Order
+
+Implemented components under `com.bscllc.learning.citibike`:
 
 | Component | Responsibility |
 | --- | --- |
@@ -1278,14 +1308,14 @@ month calculations are deterministic. Cover:
 - A second writable process failing ownership checks and documented read-only
   replica behavior, while all Phase 1 memory-mode regressions remain green.
 
-Future verification commands are `mvn clean test`, `mvn clean verify` (including
+Verification commands are `mvn clean test`, `mvn clean verify` (including
 fast-JAR tests), and the existing resource-discovery script in its memory/demo
 profile. Add a packaged ingestion verification script using the local HTTP stub
 and a temporary durable volume: import two months, restart, confirm no reimport,
 replace a revised month, inject a failure, and verify old data/readiness remain
 available. It must not depend on live S3 or download gigabytes in ordinary CI.
 
-The opt-in full-data check must enumerate the current archive, count all selected
+The opt-in full-data check enumerates the current archive, count all selected
 CSV rows, establish schema/quality results, verify source provenance and exact
 load totals, and record import time, disk/spill growth, peak process memory, and
 representative query latency. Record measured evidence and configuration; do not
@@ -1298,20 +1328,147 @@ history; all listed deterministic and packaged checks pass; and README contains
 storage trade-offs, configuration, security, backup/restore, deployment,
 publication-delay, and stopped-process scheduling instructions.
 
-### Phase 2 Milestones — Not Implemented
+### Phase 2 Milestones — Complete
 
-- [ ] Full-archive profiling and validation-policy reconciliation
-- [ ] Persistent DuckDB lifecycle, migrations, and ownership protection
-- [ ] Durable metadata and snapshot-consistent reporting
-- [ ] Paged archive discovery, including annual archive fallback
-- [ ] Streaming downloads, immutable cache, integrity checks, and safe extraction
-- [ ] Atomic monthly import/replacement and global duplicate protection
-- [ ] Idempotency, interrupted-job recovery, and crash/restore verification
-- [ ] Monthly scheduling, daily catch-up, and historical backfill
-- [ ] Protected manual ingestion and operational status
-- [ ] Ingestion metrics, freshness, and readiness behavior
-- [ ] Deterministic HTTP/archive tests and packaged ingestion verification
-- [ ] README updates, measured full-data verification, and operational runbook
+- [x] Full-archive profiling and validation-policy reconciliation
+- [x] Persistent DuckDB lifecycle, migrations, and ownership protection
+- [x] Durable metadata and snapshot-consistent reporting
+- [x] Paged archive discovery, including annual archive fallback
+- [x] Streaming downloads, immutable cache, integrity checks, and safe extraction
+- [x] Atomic monthly import/replacement and global duplicate protection
+- [x] Idempotency, interrupted-job recovery, and crash/restore verification
+- [x] Monthly scheduling, daily catch-up, and historical backfill
+- [x] Protected manual ingestion and operational status
+- [x] Ingestion metrics, freshness, and readiness behavior
+- [x] Deterministic HTTP/archive tests and packaged ingestion verification
+- [x] README updates, measured full-data verification, and operational runbook
+
+### Phase 2 Completion Evidence — October 12, 2026
+
+- Final `mvn clean verify` passed **102 unit/application tests and 3 integration
+  tests**, with zero failures, errors, or skips. Python syntax and
+  `git diff --check` passed. Verification-only processes/containers and the
+  large temporary archive/databases were removed; aggregate evidence remains.
+- Full-source discovery/download and profiling audited **4,982,855 NYC rides**
+  across all five September 2026 CSVs. Source bytes, ETag, SHA-256, row/quality
+  counts, native resource settings, and measured results are preserved in
+  `docs/ingestion-profile-2026-10-12.json`.
+- The complete archive was replayed through the real streaming HTTP/local-cache,
+  ZIP, validation, and atomic import pipeline on a temporary file-backed volume.
+  It committed all rows, reported zero invalid rows, and returned UNCHANGED on
+  recheck. The final sampled run took about 10.11 seconds; summary/data-quality
+  queries took about 135/237 ms. Retained disk was 1,232,210,971 bytes; sampled peak runtime
+  files/spill were 2,995,420,024/863,862,784 bytes. Peak RSS was 1,625,096,192 bytes. File/spill samples measure
+  logical bytes every 200 ms. These observations validate an 8 GB production
+  spill ceiling and show that DuckDB's 512 MB setting does not cap total RSS.
+- Deterministic tests cover monthly/annual discovery, cache reuse, publication
+  delay/overdue and retries, CRC/corruption, unsafe names/backslashes, symlinks,
+  encryption/methods, ZIP64, false sizes, budgets, legacy schemas, duplicate
+  handling, policy-specific boundaries/paired-null coordinates, quoted/bounded
+  headers, empty-member configuration, corrected/idempotent imports, metadata
+  snapshot visibility, bootstrap replacement, schema upgrades, ownership,
+  backup-gated retention, administrative authentication/authorization, queue
+  bounds, New York month calculation, and NYC/JC catch-up fairness.
+- Packaged subprocess checks crash before commit and after commit-before-ack,
+  recover DuckDB/WAL, verify two independently committed months, and refuse a
+  second writer. The packaged API script passed protected backfill/manual
+  ingestion, restart without reimport, correction/removal, failed-revision
+  readiness, coherent metadata, checksum backup, and restored queries.
+- The resource-discovery script passed in explicit memory mode: 1,501 rides and
+  two top-level files in both packaged and dev modes, with nested input excluded.
+- Monitoring now includes a sixth monthly-ingestion dashboard. All six
+  provisioned dashboards and **59 PromQL expressions** were checked against
+  actual application metrics through Prometheus and Grafana. Promtool fixtures
+  passed 14 checks across five missing/disabled/no-traffic/independent-health
+  scenarios. Verification used an isolated temporary Compose project.
+- `README.md`, `docs/INGESTION.md`, and monitoring instructions document modes,
+  trade-offs, protected operations, schedules/offline behavior, quotas, policy,
+  retention, backup/restore, and single-writer/read-replica deployment limits.
+
+## Grafana And Prometheus Monitoring — Implemented
+
+### Design And Scope
+
+Add a local Compose stack with pinned Prometheus `v3.15.0` and Grafana `13.2.3`.
+The application stays outside Docker. Prometheus scrapes `/q/metrics` every 15
+seconds through a file-discovered host target. Grafana provisions the datasource
+and five repository-owned JSON dashboards: API, DuckDB, CSV loading, latest
+archive downloads, and JVM/process. The later ingestion extension adds a sixth dashboard and activates file-backed
+monthly import independently of the archive-only downloader.
+
+Use loopback-published ports (9090/3000 by default), independent named data
+volumes, a Compose file secret for configurable Grafana credentials, and ignored
+local `.env`/target/secret files. Prometheus retains 15 days or approximately
+2 GB of blocks; budget WAL/head overhead separately. Disable Grafana analytics,
+plugin preinstallation, and update checks. Document host connectivity and
+Linux bridge/listening-address requirements.
+
+### Instrumentation And Dashboard Semantics
+
+Inspect the actual running `/q/metrics` output before choosing PromQL names and
+labels. Existing HTTP/JDBC timers initially export summaries. Add a narrowly
+scoped Micrometer filter with 14 histogram boundaries from 1ms to 60s for
+`http.server.requests` and `citibike.jdbc.query.duration`. Existing count/sum
+series and application contracts remain intact.
+
+Register fixed configured connection/thread/memory/spill/timeout gauges and
+`citibike.analytics.ready`. Readiness uses the existing bounded health probe on
+scrape, not downloader outcome. Memory/spill gauges express configured ceilings
+in decimal bytes and do not claim measured native allocations.
+
+Eagerly initialize downloader enabled/active, last-check time/result, and
+last-success publication time gauges. Initial unknown timestamps/results are
+NaN. Disabled activity/freshness queries are filtered out. Failed/no-match checks
+set the last-check result to zero while retained archive publication time stays
+available. Busy checks do not overwrite a completed check's timestamp/result.
+Initialize fixed downloader outcome and CSV validation/runtime failure counters
+so genuine zero cumulative failures have an exported series. Tests explicitly
+select failure-reason series rather than assuming a counter has only one tag.
+
+All dashboard selectors scope the `citibike` job and selected application
+instance. Dependent panels require scrape reachability. Request latency and
+error fractions require positive rates; no samples are displayed as unknown,
+not zero or green. CSV startup load duration uses cumulative sum/count because
+loading can complete before the first scrape. Counters describe this process,
+not durable job history. No new labels contain months, archive names, hashes,
+ride IDs, station names, or attempt IDs.
+
+### Files And Operational Verification
+
+- `monitoring/compose.yaml`, `.env.example`, and `monitoring/README.md`: local
+  stack, configuration, secrets, networking, retention, operations, and checks.
+- `monitoring/prometheus/`: scrape config, default file targets, and promtool
+  expression fixtures for missing metrics, idle API traffic, disabled downloads,
+  and independent analytics readiness during a failed check.
+- `monitoring/grafana/`: provisioned datasource/provider and five dashboards.
+- `scripts/generate_monitoring_dashboards.py`: deterministic dashboard generator.
+- `scripts/verify_monitoring.py`: checks JSON structure, provisioned dashboards,
+  Grafana datasource health, actual exported metric references, and evaluates
+  every panel expression through the live Prometheus engine. Optional synthetic
+  requests populate success/client-error series across multiple scrapes.
+
+### Monitoring Completion Evidence — October 12, 2026
+
+- `mvn verify` passed **72 unit/application tests and 2 integration tests**, with
+  zero failures, errors, or skips. Tests cover histogram export, configured
+  limits, readiness, initial unknown freshness, disabled state, retained success
+  through download failure, and bounded tags.
+- Docker Compose configuration validation and Prometheus `promtool check config`
+  passed for the final setup. `promtool test rules` passed 11 expression checks
+  across four edge-case scenarios.
+- On Docker Desktop/macOS, the packaged application ran outside Docker on port
+  18080; Prometheus/Grafana used test ports 19090/13000. The live verifier
+  confirmed the datasource, all five provisioned dashboards, and **49 panel
+  expressions** against actual exported metrics, directly through Prometheus
+  and through Grafana's datasource API. Synthetic requests produced real API
+  rates/error series. The disabled downloader's dependent panels stayed absent.
+- Recreating the containers retained credentials and monitoring volumes; the
+  same complete live verification passed afterward. Secret-path changes require
+  `up -d --force-recreate`, as documented.
+- Dashboard JSON regeneration, Python syntax checks, and `git diff --check`
+  passed. No live Citi Bike archive was downloaded. The verification-only
+  application and containers were stopped; local default ports/target settings
+  were restored, with the ignored credential file and named volumes retained.
 
 ## References
 

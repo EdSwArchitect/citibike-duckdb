@@ -10,6 +10,15 @@ import jakarta.validation.constraints.Pattern;
 
 @ConfigMapping(prefix = "citibike")
 public interface CitibikeConfig {
+    Storage storage();
+
+    interface Storage {
+        @WithDefault("file") @Pattern(regexp="memory|file") String mode();
+        @WithDefault("./data/citibike") String dataDirectory();
+        @WithDefault("citibike.duckdb") @Pattern(regexp="[A-Za-z0-9_-]+\\.duckdb") String databasePath();
+        @WithDefault("false") boolean bootstrapBundled();
+    }
+
     Csv csv();
 
     Jdbc jdbc();

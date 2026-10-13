@@ -112,8 +112,9 @@ public class RideAnalyticsService {
     }
 
     public DataQualityResponse dataQuality() {
-        LoadReport report = loader.report();
-        DataQualityStats stats = repository.dataQuality();
+        var snapshot = repository.dataQualitySnapshot(loader.report());
+        LoadReport report = snapshot.report();
+        DataQualityStats stats = snapshot.stats();
         List<SourceFileLoadResponse> sources = report.rowsBySource().entrySet().stream()
                 .sorted(Comparator.comparing(java.util.Map.Entry::getKey))
                 .map(entry -> new SourceFileLoadResponse(entry.getKey(), entry.getValue()))

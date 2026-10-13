@@ -83,7 +83,7 @@ final class RideSql {
                     OR member_casual IS NULL OR member_casual NOT IN ('member', 'casual')
                     OR started_at IS NULL OR ended_at IS NULL
                     OR NOT isfinite(started_at) OR NOT isfinite(ended_at) OR ended_at <= started_at
-                    OR start_lat IS NULL OR start_lng IS NULL
+                    OR (start_lat IS NULL) <> (start_lng IS NULL)
                     OR start_lat NOT BETWEEN -90 AND 90 OR start_lng NOT BETWEEN -180 AND 180
                     OR (end_lat IS NULL) <> (end_lng IS NULL)
                     OR (end_lat IS NOT NULL AND end_lat NOT BETWEEN -90 AND 90)

@@ -5,8 +5,14 @@ import org.junit.jupiter.api.Test;
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
 
+@io.quarkus.test.junit.TestProfile(PackagedApplicationIT.MemoryProfile.class)
 @QuarkusIntegrationTest
 class PackagedApplicationIT {
+    public static class MemoryProfile implements io.quarkus.test.junit.QuarkusTestProfile {
+        @Override public java.util.Map<String,String> getConfigOverrides() {
+            return java.util.Map.of("citibike.storage.mode", "memory", "citibike.ingestion.enabled", "false");
+        }
+    }
     @Test void fastJarLoadsOnlyApplicationResourcesAndServesTheApi() {
         given().when().get("/api/v1/rides/summary").then().statusCode(200).body("rideCount", equalTo(1500));
         given().when().get("/api/v1/data-quality").then().statusCode(200)

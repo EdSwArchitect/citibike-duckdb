@@ -19,6 +19,8 @@ public class CitibikeMetrics {
 
     public CitibikeMetrics(MeterRegistry registry) {
         this.registry = registry;
+        registry.counter("citibike.csv.load.failures", "reason", "validation");
+        registry.counter("citibike.csv.load.failures", "reason", "runtime");
         Gauge.builder("citibike.csv.files.discovered", filesDiscovered, AtomicInteger::get)
                 .register(registry);
         Gauge.builder("citibike.csv.files.loaded", filesLoaded, AtomicInteger::get)
@@ -27,6 +29,10 @@ public class CitibikeMetrics {
                 .register(registry);
         Gauge.builder("citibike.jdbc.connections.active", activeConnections, AtomicInteger::get)
                 .register(registry);
+    }
+
+    public void recordCommittedData(com.bscllc.learning.citibike.db.LoadReport report) {
+        filesDiscovered.set(report.filesDiscovered());filesLoaded.set(report.filesLoaded());rowsLoaded.set(report.totalRows());
     }
 
     public Timer.Sample startTimer() {

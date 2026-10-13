@@ -108,7 +108,8 @@ def main():
             raise RuntimeError(build_log.read_text()[-6000:])
         index = (project / "target/classes/META-INF/duckdb-learn/citibike-csv.index").read_text().splitlines()
         assert index == expected_files, index
-        properties = ["-Dquarkus.http.port=0", "-Dquarkus.http.host=127.0.0.1"]
+        properties = ["-Dquarkus.http.port=0", "-Dquarkus.http.host=127.0.0.1",
+                      "-Dcitibike.storage.mode=memory", "-Dcitibike.ingestion.enabled=false"]
         verify_mode(project, ["java", "--enable-native-access=ALL-UNNAMED", *properties, "-jar",
                               "target/quarkus-app/quarkus-run.jar"], "fast-jar", rows + 1, expected_files)
         verify_mode(project, ["mvn", "-B", "-Ddebug=false", "-Dquarkus.analytics.disabled=true",

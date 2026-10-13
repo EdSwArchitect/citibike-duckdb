@@ -164,7 +164,7 @@ class LoaderAndLifecycleTest {
         assertThrows(DatabaseBusyException.class, loader::report);
         assertEquals(2, registry.get("citibike.csv.files.discovered").gauge().value());
         assertEquals(0, registry.get("citibike.csv.files.loaded").gauge().value());
-        assertEquals(1, registry.get("citibike.csv.load.failures").counter().count());
+        assertEquals(1, registry.get("citibike.csv.load.failures").tag("reason", "validation").counter().count());
     }
 
     @Test void noMatchingFilesFailStartup() {

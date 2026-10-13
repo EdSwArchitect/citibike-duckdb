@@ -23,8 +23,8 @@ public final class LatestArchiveDownloader {
     public LatestArchiveDownloader(DownloadConfig cfg) { this(cfg, URI.create("https://s3.amazonaws.com/tripdata")); }
     // Package-private origin injection exists exclusively for local stub tests.
     LatestArchiveDownloader(DownloadConfig cfg, URI origin) { this.cfg = cfg; this.origin = origin; }
-    void begin() { deadline = System.nanoTime() + cfg.operationTimeout().toNanos(); retries = 0; }
-    int retries() { return retries; }
+    public void begin() { deadline = System.nanoTime() + cfg.operationTimeout().toNanos(); retries = 0; }
+    public int retries() { return retries; }
     private void check() throws IOException { if (Thread.currentThread().isInterrupted() || System.nanoTime() >= deadline) throw new IOException("DEADLINE"); }
     private int timeout(Duration limit) throws IOException { check(); return (int)Math.max(1, Math.min(Integer.MAX_VALUE,
             Math.min(limit.toMillis(), (deadline - System.nanoTime()) / 1_000_000))); }
@@ -55,7 +55,7 @@ public final class LatestArchiveDownloader {
         throw last;
     }
     static class Permanent extends IOException { Permanent(String code) { super(code); } }
-    static class Changed extends Permanent { Changed() { super("SOURCE_CHANGED"); } }
+    public static class Changed extends Permanent { Changed() { super("SOURCE_CHANGED"); } }
     static class Transient extends IOException { final long after; Transient(long after) { super("HTTP_TRANSIENT"); this.after = after; } }
     private void response(HttpURLConnection c, boolean changed) throws IOException {
         int code = c.getResponseCode();
@@ -82,10 +82,10 @@ public final class LatestArchiveDownloader {
     }
     static String text(Element e, String name) { var n = e.getElementsByTagNameNS("*",name); return n.getLength() == 0 ? null : n.item(0).getTextContent(); }
     static String encode(String v) { return URLEncoder.encode(v, java.nio.charset.StandardCharsets.UTF_8); }
-    public Source discover() throws IOException {
-        Source best = null; String token = null; Set<String> tokens = new HashSet<>(); Map<String,Source> seen = new HashMap<>();
+    public java.util.List<Source> listObjects(String prefix) throws IOException {
+         String token = null; Set<String> tokens = new HashSet<>(); Map<String,Source> seen = new LinkedHashMap<>();
         for (int page = 0; page < cfg.maxListingPages(); page++) {
-            byte[] xml = listing("?list-type=2&max-keys=1000&encoding-type=url" + (token == null ? "" : "&continuation-token=" + encode(token)));
+            byte[] xml = listing("?list-type=2&max-keys=1000&encoding-type=url" + (prefix==null?"":"&prefix="+encode(prefix)) + (token == null ? "" : "&continuation-token=" + encode(token)));
             Element root;
             try {
                 DocumentBuilderFactory f = DocumentBuilderFactory.newInstance(); f.setNamespaceAware(true);
@@ -100,24 +100,39 @@ public final class LatestArchiveDownloader {
                 var objects = root.getElementsByTagNameNS("*","Contents");
                 for (int i=0;i<objects.getLength();i++) {
                     Element o = (Element) objects.item(i); String key = text(o,"Key");
-                    if (key == null) throw new IllegalArgumentException();
+                    if (key == null || key.length()>1024) throw new IllegalArgumentException();
                     if ("url".equals(text(root,"EncodingType"))) key = URLDecoder.decode(key.replace("+","%2B"),java.nio.charset.StandardCharsets.UTF_8);
-                    if (!KEY.matcher(key).matches()) continue;
-                    int year = Integer.parseInt(key.substring(0,4)), month = Integer.parseInt(key.substring(4,6));
-                    if (year == 0 || month < 1 || month > 12) continue;
-                    YearMonth.of(year,month); long size = Long.parseLong(text(o,"Size")); if (size < 0) throw new IllegalArgumentException();
-                    Source s = new Source(key,key.substring(0,6),text(o,"ETag"),null,text(o,"LastModified"),size);
+                    long size = Long.parseLong(text(o,"Size")); if (size < 0) throw new IllegalArgumentException();
+                    Source s = new Source(key,null,text(o,"ETag"),null,text(o,"LastModified"),size);
                     Source previous = seen.putIfAbsent(key,s); if (previous != null && !previous.equals(s)) throw new Permanent("LISTING_CONFLICT");
-                    if (best == null || s.month().compareTo(best.month()) > 0) best=s;
+                    if(seen.size()>100000)throw new Permanent("LISTING_LIMIT");
                 }
             } catch (Permanent e) { throw e; } catch (Exception e) { throw new Permanent("INVALID_LISTING"); }
             String truncated = text(root,"IsTruncated");
-            if ("false".equals(truncated)) return best;
+            if ("false".equals(truncated)) return java.util.List.copyOf(seen.values());
             if (!"true".equals(truncated)) throw new Permanent("INVALID_LISTING");
             token = text(root,"NextContinuationToken");
             if (token == null || token.isBlank() || !tokens.add(token)) throw new Permanent("INVALID_PAGINATION");
         }
         throw new Permanent("LISTING_LIMIT");
+    }
+    public Source discover() throws IOException {
+        Source best=null;
+        for(Source source:listObjects(null)) {
+            String key=source.key();if(!KEY.matcher(key).matches())continue;
+            int year=Integer.parseInt(key.substring(0,4)),month=Integer.parseInt(key.substring(4,6));
+            if(year==0 || month<1 || month>12)continue;
+            Source candidate=new Source(key,key.substring(0,6),source.etag(),source.version(),source.modified(),source.size());
+            if(best==null || candidate.month().compareTo(best.month())>0)best=candidate;
+        }
+        return best;
+    }
+    /** Trusted deployment origin for monthly ingestion; manual requests cannot change it. */
+    public static LatestArchiveDownloader forIngestion(DownloadConfig limits, URI origin) {
+        if(origin.getUserInfo()!=null || origin.getQuery()!=null || origin.getFragment()!=null
+            || !(origin.getScheme().equals("https") || (origin.getScheme().equals("http") && java.util.Set.of("localhost","127.0.0.1","[::1]").contains(origin.getHost()))))
+            throw new IllegalArgumentException("Ingestion origin must be HTTPS or a local test stub");
+        return new LatestArchiveDownloader(limits,origin);
     }
     public Source head(Source s) throws IOException {
         return retry(() -> { HttpURLConnection c = open("/"+s.key(),"HEAD",null);

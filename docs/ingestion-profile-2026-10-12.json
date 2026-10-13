@@ -1,0 +1,62 @@
+{
+  "date": "2026-10-12",
+  "source": {
+    "key": "202609-citibike-tripdata.zip",
+    "size": 972151835,
+    "etag": "\"468907af4bee542cf84202d188ec7e34-57\"",
+    "sha256": "81b5d756665ef7a69cc5189349511fb7ec973fcf20ab6ca7078732cb7e50537c",
+    "seconds": 21.594
+  },
+  "audit": {
+    "row_count": 4982855,
+    "missing_ids": 0,
+    "invalid_timestamps": 0,
+    "zero_duration": 0,
+    "negative_duration": 0,
+    "invalid_categories": 0,
+    "missing_start_coordinates": 2917,
+    "unpaired_end_coordinates": 0,
+    "invalid_coordinates": 0,
+    "outliers": 1070,
+    "minimum_started": "2026-08-31 00:50:32.105",
+    "maximum_started": "2026-09-30 23:58:16.821",
+    "duplicate_ids": 0,
+    "unpaired_start_coordinates": 0,
+    "paired_missing_start_coordinates": 2917,
+    "prior_month_starts": 549,
+    "next_month_ends": 0,
+    "outside_requested_month": 0,
+    "minimum_ended": "2026-09-01 00:00:02.419",
+    "maximum_ended": "2026-09-30 23:59:59.555",
+    "csv_files": 5,
+    "expanded_bytes": 972151133,
+    "audit_seconds": 7.147215625
+  },
+  "pipeline_smoke": {
+    "import_status": "COMMITTED",
+    "import_reason": "null",
+    "import_rows": 4982855,
+    "import_seconds": 10.112496333,
+    "files": 5,
+    "summary_rows": 4982855,
+    "summary_ms": 135.214833,
+    "invalid_rows": 0,
+    "quality_ms": 236.944542,
+    "recheck_status": "UNCHANGED",
+    "sampled_peak_runtime_file_bytes": 2995420024,
+    "sampled_peak_spill_bytes": 863862784,
+    "retained_disk_bytes": 1232210971,
+    "peak_rss_bytes": 1625096192
+  },
+  "settings": {
+    "duckdb_memory_limit": "512MB",
+    "threads": 4,
+    "spill_limit": "8GB",
+    "mode": "file",
+    "sql_timeout": "30m",
+    "public_query_timeout": "2s",
+    "schema_version": 3,
+    "policy": "monthly-v2"
+  },
+  "method": "All bytes downloaded from programmatically discovered S3 object; all five CSVs audited; complete archive replayed via streaming local HTTP stub through the real pipeline. Disk/spill figures are sampled logical file sizes every 200ms, not allocated filesystem blocks."
+}

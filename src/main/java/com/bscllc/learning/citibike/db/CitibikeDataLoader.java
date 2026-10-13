@@ -32,53 +32,6 @@ import java.util.Set;
 @ApplicationScoped
 public class CitibikeDataLoader {
     private static final Logger LOG = LoggerFactory.getLogger(CitibikeDataLoader.class);
-    private static final List<String> EXPECTED_HEADER = List.of(
-            "ride_id", "rideable_type", "started_at", "ended_at",
-            "start_station_name", "start_station_id", "end_station_name",
-            "end_station_id", "start_lat", "start_lng", "end_lat", "end_lng",
-            "member_casual");
-
-    private static final String CREATE_STAGING_SQL = """
-            CREATE TABLE rides_staging (
-                ride_id VARCHAR NOT NULL,
-                rideable_type VARCHAR NOT NULL,
-                started_at TIMESTAMP NOT NULL,
-                ended_at TIMESTAMP NOT NULL,
-                start_station_name VARCHAR,
-                start_station_id VARCHAR,
-                end_station_name VARCHAR,
-                end_station_id VARCHAR,
-                start_lat DOUBLE NOT NULL,
-                start_lng DOUBLE NOT NULL,
-                end_lat DOUBLE,
-                end_lng DOUBLE,
-                member_casual VARCHAR NOT NULL,
-                source_file VARCHAR NOT NULL
-            )
-            """;
-
-    private static final String LOAD_CSV_SQL = """
-            INSERT INTO rides_staging
-            SELECT ride_id, rideable_type, started_at, ended_at,
-                   start_station_name, start_station_id, end_station_name, end_station_id,
-                   start_lat, start_lng, end_lat, end_lng, member_casual, ?
-            FROM read_csv(?, header = true, strict_mode = true, columns = {
-                'ride_id': 'VARCHAR',
-                'rideable_type': 'VARCHAR',
-                'started_at': 'TIMESTAMP',
-                'ended_at': 'TIMESTAMP',
-                'start_station_name': 'VARCHAR',
-                'start_station_id': 'VARCHAR',
-                'end_station_name': 'VARCHAR',
-                'end_station_id': 'VARCHAR',
-                'start_lat': 'DOUBLE',
-                'start_lng': 'DOUBLE',
-                'end_lat': 'DOUBLE',
-                'end_lng': 'DOUBLE',
-                'member_casual': 'VARCHAR'
-            })
-            """;
-
     private final DuckDbManager duckDb;
     private final CsvResourceCatalog catalog;
     private final CitibikeConfig config;
@@ -97,6 +50,21 @@ public class CitibikeDataLoader {
         Timer.Sample timer = metrics.startTimer();
         try {
             duckDb.start();
+            if(duckDb.fileMode()) {
+                boolean available=duckDb.withWriter(c -> {
+                    try(var st=c.createStatement();var r=st.executeQuery("SELECT count(*) FROM active_partitions")) { r.next();return r.getLong(1)>0; }
+                });
+                if(!available && duckDb.bootstrapBundled()) {
+                    com.bscllc.learning.citibike.ingestion.MonthlyImporter.bootstrap(duckDb,catalog.discover());
+                    available=true;
+                }
+                duckDb.activate(available);
+                if(available) {
+                    report=duckDb.withSnapshot(LoadReports::read);
+                    metrics.recordLoadSuccess(timer,report.filesDiscovered(),report.filesLoaded(),report.totalRows());
+                }
+                return;
+            }
             List<CsvResource> resources = catalog.discover();
             metrics.recordDiscovered(resources.size());
             LOG.info("Discovered {} Citi Bike CSV resource(s): {}", resources.size(),
@@ -116,6 +84,7 @@ public class CitibikeDataLoader {
     }
 
     public LoadReport report() {
+        if(duckDb.fileMode())return duckDb.withSnapshot(LoadReports::read);
         LoadReport current = report;
         if (current == null) {
             throw new DatabaseBusyException("CSV loading has not completed");
@@ -143,7 +112,7 @@ public class CitibikeDataLoader {
 
         try (Statement statement = connection.createStatement()) {
             statement.execute("DROP TABLE IF EXISTS rides_staging");
-            statement.execute(CREATE_STAGING_SQL);
+            statement.execute(CsvImporter.CREATE_STAGING_SQL);
 
             for (CsvResource resource : resources) {
                 Timer.Sample fileTimer = metrics.startTimer();
@@ -167,7 +136,7 @@ public class CitibikeDataLoader {
                 }
             }
 
-            validateLoadedData(connection);
+            CsvImporter.validateLoadedData(connection,config.csv().failOnDuplicateRideId());
             LocalDateTime[] bounds = readBounds(connection);
             statement.execute("DROP TABLE IF EXISTS rides");
             statement.execute("ALTER TABLE rides_staging RENAME TO rides");
@@ -189,84 +158,19 @@ public class CitibikeDataLoader {
     }
 
     private void loadOne(Connection connection, CsvResource resource) throws IOException, SQLException {
-        validateHeader(resource);
+        CsvImporter.validateHeader(resource);
         Path extracted = Files.createTempFile(duckDb.importDirectory(), "citibike-import-", ".csv");
         try {
             try (var input = resource.openStream()) {
                 Files.copy(input, extracted, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             }
-            try (PreparedStatement statement = connection.prepareStatement(LOAD_CSV_SQL)) {
+            try (PreparedStatement statement = connection.prepareStatement(CsvImporter.LOAD_CSV_SQL)) {
                 statement.setString(1, resource.name());
                 statement.setString(2, extracted.toAbsolutePath().toString());
                 statement.executeUpdate();
             }
         } finally {
             Files.deleteIfExists(extracted);
-        }
-    }
-
-    private static void validateHeader(CsvResource resource) throws IOException {
-        try (BufferedReader reader = new BufferedReader(
-                new InputStreamReader(resource.openStream(), StandardCharsets.UTF_8))) {
-            String header = reader.readLine();
-            if (header == null) {
-                throw new IllegalStateException("CSV resource is empty: " + resource.name());
-            }
-            if (header.startsWith("\uFEFF")) {
-                header = header.substring(1);
-            }
-            List<String> columns = Arrays.stream(header.split(",", -1))
-                    .map(String::trim)
-                    .map(CitibikeDataLoader::stripQuotes)
-                    .toList();
-            if (!columns.equals(EXPECTED_HEADER)) {
-                throw new IllegalStateException("Unexpected CSV header in " + resource.name());
-            }
-        }
-    }
-
-    private void validateLoadedData(Connection connection) throws SQLException {
-        assertNoRows(connection, """
-                SELECT 1 FROM rides_staging
-                WHERE trim(ride_id) = '' OR NOT isfinite(started_at) OR NOT isfinite(ended_at)
-                LIMIT 1
-                """, "CSV contains an invalid required identifier or timestamp");
-        assertNoRows(connection, """
-                SELECT 1 FROM rides_staging
-                WHERE rideable_type NOT IN ('classic_bike', 'electric_bike', 'docked_bike')
-                   OR member_casual NOT IN ('member', 'casual')
-                LIMIT 1
-                """, "CSV contains an unsupported categorical value");
-        assertNoRows(connection, """
-                SELECT 1 FROM rides_staging
-                WHERE ended_at <= started_at
-                LIMIT 1
-                """, "CSV contains a non-positive ride duration");
-        assertNoRows(connection, """
-                SELECT 1 FROM rides_staging
-                WHERE start_lat NOT BETWEEN -90 AND 90
-                   OR start_lng NOT BETWEEN -180 AND 180
-                   OR (end_lat IS NULL) <> (end_lng IS NULL)
-                   OR (end_lat IS NOT NULL AND end_lat NOT BETWEEN -90 AND 90)
-                   OR (end_lng IS NOT NULL AND end_lng NOT BETWEEN -180 AND 180)
-                LIMIT 1
-                """, "CSV contains invalid coordinates");
-        if (config.csv().failOnDuplicateRideId()) {
-            assertNoRows(connection, """
-                    SELECT ride_id FROM rides_staging
-                    GROUP BY ride_id HAVING count(*) > 1
-                    LIMIT 1
-                    """, "Duplicate ride_id found across CSV resources");
-        }
-    }
-
-    private static void assertNoRows(Connection connection, String sql, String message)
-            throws SQLException {
-        try (Statement statement = connection.createStatement();
-             ResultSet result = statement.executeQuery(sql)) {
-            if (result.next()) {
-                throw new IllegalStateException(message);
-            }
         }
     }
 
@@ -291,13 +195,6 @@ public class CitibikeDataLoader {
                     result.getTimestamp(2).toLocalDateTime()
             };
         }
-    }
-
-    private static String stripQuotes(String value) {
-        if (value.length() >= 2 && value.startsWith("\"") && value.endsWith("\"")) {
-            return value.substring(1, value.length() - 1);
-        }
-        return value;
     }
 
     private static void rollback(Connection connection) {

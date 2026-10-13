@@ -1,6 +1,8 @@
 package com.bscllc.learning.citibike.repository;
 
 import com.bscllc.learning.citibike.db.DataAccessException;
+import com.bscllc.learning.citibike.db.LoadReport;
+import com.bscllc.learning.citibike.db.LoadReports;
 import com.bscllc.learning.citibike.db.DatabaseBusyException;
 import com.bscllc.learning.citibike.db.DuckDbManager;
 import com.bscllc.learning.citibike.dto.ActivityBucketResponse;
@@ -199,8 +201,17 @@ public class RideAnalyticsRepository {
         }));
     }
 
+    public record QualitySnapshot(LoadReport report,DataQualityStats stats) {}
+    public QualitySnapshot dataQualitySnapshot(LoadReport memoryReport) {
+        return timed("data-quality", () -> duckDb.withSnapshot(connection -> {
+            LoadReport report=duckDb.fileMode()?LoadReports.read(connection):memoryReport;
+            return new QualitySnapshot(report,dataQuality(connection));
+        }));
+    }
     public DataQualityStats dataQuality() {
-        return timed("data-quality", () -> duckDb.withConnection(connection -> {
+        return timed("data-quality", () -> duckDb.withConnection(this::dataQuality));
+    }
+    private DataQualityStats dataQuality(java.sql.Connection connection)throws SQLException {
             try (PreparedStatement statement = connection.prepareStatement(RideSql.DATA_QUALITY)) {
                 configure(statement);
                 try (ResultSet result = statement.executeQuery()) {
@@ -219,7 +230,6 @@ public class RideAnalyticsRepository {
                             result.getLong("rides_over_24_hours"));
                 }
             }
-        }));
     }
 
     private List<CategorySummaryResponse> categorySummary(
